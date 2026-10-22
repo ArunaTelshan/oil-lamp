@@ -1,0 +1,52 @@
+html, body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #03040a;
+}
+body.nocursor, body.nocursor * { cursor: none; }
+canvas { display: block; }
+
+#start {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: radial-gradient(ellipse at 50% 60%, rgba(40, 24, 10, 0.55), rgba(2, 3, 8, 0.94) 70%);
+  color: #f3e6c8;
+  font-family: 'Cormorant Garamond', Georgia, serif;
+  text-align: center;
+  cursor: pointer;
+  transition: opacity 1.6s ease;
+  z-index: 2;
+}
+#start.hidden { opacity: 0; pointer-events: none; }
+.start-inner { padding: 24px; }
+#start h1 {
+  font-family: 'Cinzel', Georgia, serif;
+  font-weight: 500;
+  letter-spacing: 0.32em;
+  font-size: clamp(28px, 4vw, 54px);
+  margin: 18px 0 10px;
+  color: #ffe2a8;
+  text-shadow: 0 0 28px rgba(255, 160, 60, 0.5);
+}
+.start-cta { font-size: clamp(18px, 2vw, 26px); font-style: italic; margin: 0 0 26px; opacity: 0.9; }
+.start-mode { font-family: system-ui, sans-serif; font-size: 14px; opacity: 0.7; margin: 6px 0; }
+.start-keys { font-family: system-ui, sans-serif; font-size: 13px; opacity: 0.5; margin: 6px 0; }
+
+.start-flame {
+  width: 26px;
+  height: 46px;
+  margin: 0 auto;
+  border-radius: 50% 50% 50% 50% / 62% 62% 38% 38%;
+  background: radial-gradient(ellipse at 50% 72%, #fffbe8 0%, #ffd77a 32%, #ff9a3a 62%, rgba(255, 110, 30, 0) 76%);
+  filter: drop-shadow(0 0 18px rgba(255, 170, 70, 0.9));
+  animation: flick 1.8s ease-in-out infinite alternate;
+  transform-origin: 50% 100%;
+}
+@keyframes flick {
+  0% { transform: scale(1, 1) rotate(-2deg); }
+  40% { transform: scale(0.94, 1.06) rotate(2deg); }
+  100% { transform: scale(1.04, 0.96) rotate(-1deg); }
+}

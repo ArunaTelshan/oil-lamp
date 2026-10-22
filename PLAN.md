@@ -17,18 +17,17 @@ A digital lamp-lighting ceremony for the AIS Halloween party. 140 guests scan a 
 - **Queue:** if many taps arrive together, lamps arrive one after another (about 0.7s apart), so each guest gets a visible moment.
 - **Living flames:** every flame flickers independently, the reflections shimmer, and lamps bob gently on the water.
 - **Fixed lamp spots:** 140 spots are spread naturally across the lake, smaller towards the far shore for depth. Lamps fill in a scattered order (not row by row), so the lake fills organically. The layout is fixed, so reloading the screen restores every lamp in place.
-- **On-screen info:** an elegant `37 / 140` counter, and a QR panel ("Scan to light your lamp") built into the design.
+- **On-screen info:** only a QR panel in the corner (no counter, no captions).
 - **Milestones at 35, 70 and 105:** a deeper bell tone, a ripple across the whole lake, and the moon brightens a step.
 - **Finale:**
-  1. The last few lamps get a build-up: "Only 3 lamps remain…", then "The final flame…".
+  1. The last five lamps get a wordless build-up: a low heartbeat and a pulsing moon.
   2. The 140th lamp lights, followed by a short silence.
   3. All flames swell, the lamps slowly drift across the water (about 10 seconds, with a gentle wobble) and assemble into **WELCOME**, reflected in the lake.
   4. The mist clears completely, the moon glows full, and sparks rise into the sky.
-  5. A subtitle fades in below: "A Bright Beginning for AIS" (text can be changed).
 
 ### Guest phone
 1. **Opening:** a small dark lake scene with one unlit clay lamp. "Light your lamp for tonight."
-2. **Nickname:** four letter boxes (like an OTP input), auto-uppercase, letters A–Z only.
+2. **Nickname:** up to four letter boxes (like an OTP input), auto-uppercase, letters A–Z only.
 3. **Hold to light:** press and hold the lamp. The wick glows, sparks, then catches. The phone vibrates on Android (iPhones don't allow web pages to vibrate).
 4. **Release to the lake:** swipe up (or tap "Send to the lake"). The flame lifts off the phone screen, while the request goes to the server in the background with automatic retries.
 5. **Keepsake card:** "Lamp #37 of 140 · NIMA · lit 7:42 PM" with the flame still burning, a mini lake map marking where their lamp is, and "Look for NIMA on the big screen." It's worth a screenshot.
@@ -48,24 +47,23 @@ A digital lamp-lighting ceremony for the AIS Halloween party. 140 guests scan a 
  │ index.html  (guest)  │            │ screen.html          │
  │ GitHub Pages         │            │ GitHub Pages         │
  └─────────┬────────────┘            └──────────▲───────────┘
-           │ light_lamp(nick, device)           │ live updates (realtime)
-           ▼                                    │ + backup poll every 5s
+           │ light_lamp(nick, device)           │ reads new lamps
+           ▼                                    │ (checks every 1s)
  ┌────────────────────────────────────────────────────────────┐
  │ Supabase (free tier): Postgres table `lamps` + one function │
  └────────────────────────────────────────────────────────────┘
 ```
 
 - **Hosting: GitHub Pages.** Static files only, free, HTTPS, short clean URL, no Google banner.
-- **Backend: Supabase (recommended).** GitHub Pages can't store a shared count, so we need a small online database.
+- **Backend: Supabase.** GitHub Pages can't store a shared count, so we need a small online database.
   - A single database function hands out lamp numbers one at a time, so two simultaneous taps never get the same lamp.
-  - The screen gets instant push updates.
+  - The screen checks for new lamps every second.
   - The free tier easily handles 140 people tapping within a minute.
-  - Alternative: keep Google Apps Script as the counter only. It works, but it's slower (1–3s per tap) and can reject taps when many people tap at once (Google limits how many requests run at the same time). We'd need retries.
 
 ### Database (Supabase)
 - **Table `lamps`:**
   - `id` 1–140, primary key (the lamp number)
-  - `nickname` must be exactly 4 letters A–Z
+  - `nickname` must be 1–4 letters A–Z
   - `device_id` unique (a random id saved on the guest's phone)
   - `created_at`
 - **Function `light_lamp(nickname, device_id)`:**
@@ -104,13 +102,13 @@ README.md           Setup + event-day checklist
 
 ## 4. Technical choices
 
-- **Screen drawn on a canvas** at 1920×1080, scaled to fit any projector. Everything is drawn in code: lamps, flames, glow, reflections, mist. No emoji or images, so it looks the same on every machine. Aim for a steady 60 fps on a normal laptop.
+- **Screen drawn on a canvas** at the window's own size, composed for the 4:3 screen. Everything is drawn in code: lamps, flames, glow, reflections, mist. No emoji or images, so it looks the same on every machine. Aim for a steady 60 fps on a normal laptop.
 - **WELCOME layout:**
   - At load, the word is drawn off-screen in a bold serif font, and 140 points are picked evenly along the letter strokes. Each letter gets points according to its size.
   - Each lamp is then matched to a letter point so the total distance travelled is smallest. Lamps glide without crossing paths chaotically.
 - **Sound:** generated in the browser (WebAudio), so there are no files to license. Soft night ambience (water, crickets), a chime per lamp with slight pitch variation, deeper bells at milestones, and a swelling chord at the finale. Browsers need one click before playing sound, so the screen opens with a "Begin ceremony" overlay for the operator.
-- **QR code:** generated on the screen from the guest URL, and also exported as a PNG for printed table signs.
-- **Fonts:** Cormorant Garamond for text, Cinzel for WELCOME and the nicknames, from Google Fonts. The guest page loads only what it needs.
+- **QR code:** generated on the screen from the guest URL.
+- **Fonts:** Cormorant Garamond for text and Cinzel for the nicknames, from Google Fonts. WELCOME is spelled by the lamps themselves. The guest page loads only what it needs.
 - **Guest page weight:** under about 150 KB total, so it loads fast on weak indoor 4G.
 - **Operator keys on the screen:**
 
@@ -131,7 +129,7 @@ README.md           Setup + event-day checklist
 1. **Foundation:** Supabase schema + function, `backend.js`, simulator. Prove that 140 rapid taps give exactly lamps 1–140, with no duplicates and no gaps.
 2. **The lake:** sky, moon, shoreline, water reflections, mist, fireflies, darkness lifting with the count.
 3. **Lamps:** lamp and flame drawing, arrival animation, nickname glow, queue, reload restoring state.
-4. **Finale:** build-up messages, WELCOME formation, mist clearing, subtitle.
+4. **Finale:** wordless build-up, WELCOME formation, mist clearing.
 5. **Guest page:** nickname input, hold-to-light, motion-reactive flame, send with retries, keepsake card.
 6. **Polish:** sound, QR panel, milestones, operator keys, demo mode, performance check.
 7. **Deploy + rehearse:**
@@ -141,16 +139,22 @@ README.md           Setup + event-day checklist
    - Run the full ceremony on the actual laptop and projector.
    - Reset.
 
-## 6. What the owner needs to do
+## 6. Decisions (confirmed)
 
-- Create a free Supabase account and project. Paste `schema.sql` into its SQL editor, then send over the project URL and the public anon key.
-- In the GitHub repo, go to Settings → Pages and set the source to the `main` branch (or GitHub Actions).
-- Confirm the open decisions below.
+- Nicknames: **up to 4 letters**, A–Z, **duplicates allowed**, with a small blocklist of rude words.
+- Backend: **Supabase**. Hosting: **GitHub Pages**.
+- **No words on the big screen**: no counter, no subtitle, no logo, no countdown text. Only the nicknames, which glow briefly, and WELCOME at the end. The build-up for the last lamps is wordless: a heartbeat sound and a pulsing moon.
+- The screen is **8×6 (4:3)**, so the scene is composed for 4:3 (it still adapts to other shapes).
+- WELCOME lamps keep floating: each has a small random offset, its own drift, and a gentle swell rolls through the word.
+- The laptop has speakers and internet. Guests use mobile data.
+- Event: **5 November**.
 
-## 7. Open decisions
+## 7. Status
 
-- Nickname: exactly 4 letters, or up to 4? Allow duplicates (two people called `NIMA`)?
-- Finale subtitle text under WELCOME.
-- AIS logo: include it in the finale? (Needs the logo file.)
-- Sound: will the laptop be connected to speakers?
-- Event date and time, to plan rehearsal.
+- [x] Database script, tested with 200 simultaneous taps (exactly 140 unique lamps)
+- [x] Big screen: lake, lamps, arrivals, nicknames, milestones, heartbeat, WELCOME finale, sound, QR, operator keys, demo mode
+- [x] Guest page: nickname, hold to light, swipe up, motion-reactive flame, keepsake with mini map, retries
+- [x] Rehearsal simulator
+- [ ] Owner: run `supabase/schema.sql` in the Supabase SQL Editor
+- [ ] Owner: enable GitHub Pages
+- [ ] Rehearse with real phones on mobile data, on the real laptop and projector

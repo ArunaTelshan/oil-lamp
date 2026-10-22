@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#05060f">
+  <title>Light Your Lamp</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600&family=Cormorant+Garamond:ital,wght@0,500;0,600;1,500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/guest.css">
+</head>
+<body>
+  <div class="sky" aria-hidden="true">
+    <div class="moon"></div>
+    <div class="stars"></div>
+    <div class="mist m1"></div>
+    <div class="mist m2"></div>
+  </div>
+
+  <main id="app" data-step="name">
+    <header class="title">
+      <p class="eyebrow">Halloween Night</p>
+      <h1>Lake of Lights</h1>
+    </header>
+
+    <div id="stage">
+      <canvas id="lamp" aria-hidden="true"></canvas>
+      <svg id="ring" viewBox="0 0 100 100" aria-hidden="true">
+        <circle cx="50" cy="50" r="46" />
+      </svg>
+    </div>
+
+    <section class="panel">
+      <!-- 1. Nickname -->
+      <div class="step" data-for="name">
+        <h2>Name your light</h2>
+        <p class="sub">Up to 4 letters. It will glow on the lake.</p>
+        <label class="cells" for="nick">
+          <span class="cell"></span><span class="cell"></span><span class="cell"></span><span class="cell"></span>
+          <input id="nick" type="text" inputmode="text" autocomplete="off" autocorrect="off"
+                 autocapitalize="characters" spellcheck="false" maxlength="4" enterkeyhint="go"
+                 aria-label="Nickname, up to 4 letters">
+        </label>
+        <p class="error" id="nickError" aria-live="polite"></p>
+        <button id="continue" class="btn" disabled>Continue</button>
+      </div>
+
+      <!-- 2. Hold to light -->
+      <div class="step" data-for="light">
+        <h2>Press &amp; hold the lamp</h2>
+        <p class="sub">Keep holding until the wick catches fire.</p>
+      </div>
+
+      <!-- 3. Release -->
+      <div class="step" data-for="release">
+        <div class="chevrons" aria-hidden="true"><span></span><span></span><span></span></div>
+        <h2>Swipe up to release it</h2>
+        <p class="sub">Send your light onto the lake.</p>
+        <button id="releaseBtn" class="btn ghost">Send to the lake</button>
+      </div>
+
+      <!-- 4. Sending -->
+      <div class="step" data-for="sending">
+        <h2>Your light is drifting…</h2>
+        <p class="sub" id="sendingNote">Watch the big screen.</p>
+      </div>
+
+      <!-- 5. Keepsake -->
+      <div class="step" data-for="done">
+        <div class="keepsake">
+          <div class="k-name" id="kName">NIMA</div>
+          <div class="k-meta" id="kMeta">Lamp 37 of 140</div>
+          <canvas id="map" aria-label="Where your lamp floats on the lake"></canvas>
+          <p class="k-find">Find your light on the lake</p>
+        </div>
+        <p class="shake-hint" id="shakeHint">Gently shake your phone ✦</p>
+      </div>
+
+      <!-- All lamps already lit -->
+      <div class="step" data-for="full">
+        <h2>The lake is full of light</h2>
+        <p class="sub">All the lamps are already glowing. Look up and enjoy the moment ✦</p>
+      </div>
+
+      <!-- Could not connect -->
+      <div class="step" data-for="offline">
+        <h2>Can't reach the lake</h2>
+        <p class="sub">Please check your mobile data, then try again.</p>
+        <button id="retryBtn" class="btn">Try again</button>
+      </div>
+    </section>
+    <p class="local-note" id="localNote" hidden>Local test mode</p>
+  </main>
+
+  <script type="module" src="js/guest.js"></script>
+</body>
+</html>

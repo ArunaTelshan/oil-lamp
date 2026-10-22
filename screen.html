@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lake of Lights</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600;700&family=Cormorant+Garamond:ital,wght@0,500;1,500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/screen.css">
+</head>
+<body>
+  <canvas id="lake" aria-label="A moonlit lake where guests' lamps float"></canvas>
+
+  <!-- Operator-only start panel (needed so the browser allows sound). -->
+  <div id="start" role="button" tabindex="0">
+    <div class="start-inner">
+      <div class="start-flame" aria-hidden="true"></div>
+      <h1>Lake of Lights</h1>
+      <p class="start-cta">Click anywhere to begin</p>
+      <p class="start-mode" id="mode"></p>
+      <p class="start-keys">F fullscreen · M mute · Q show/hide QR · H operator panel</p>
+    </div>
+  </div>
+
+  <script src="js/vendor/qrcode.js"></script>
+  <script type="module" src="js/screen.js"></script>
+</body>
+</html>

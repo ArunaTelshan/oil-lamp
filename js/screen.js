@@ -1,0 +1,657 @@
+// Lake of Lights — big screen.
+import { CONFIG } from './config.js';
+import { makeSlots, makeOrder, wordTargets, wordSpacing, matchTargets } from './layout.js';
+import { makeGlow, GLOW_WARM, wobble, drawFlame, drawLampBody, drawWaterContact, drawReflection, wickPos } from './lamp-art.js';
+import { Scene } from './scene.js';
+import { LakeAudio } from './audio.js';
+import { backendMode, watchLamps } from './backend.js';
+
+const N = CONFIG.TOTAL_LAMPS;
+const WORD = CONFIG.FINALE_WORD || 'WELCOME';
+const MILESTONES = [Math.round(N * 0.25), Math.round(N * 0.5), Math.round(N * 0.75)];
+const params = new URLSearchParams(location.search);
+const MODE = backendMode();
+
+const canvas = document.getElementById('lake');
+const ctx = canvas.getContext('2d');
+const scene = new Scene();
+const audio = new LakeAudio();
+const glow = makeGlow(128, GLOW_WARM);
+const ember = makeGlow(64, [[0, 'rgba(255,250,220,1)'], [0.25, 'rgba(255,200,110,0.7)'], [1, 'rgba(255,120,30,0)']]);
+
+const SLOTS = makeSlots(CONFIG.LAYOUT_SEED, N);
+const ORDER = makeOrder(CONFIG.LAYOUT_SEED, N);
+
+let W = 0, H = 0, DPR = 1, BASE = 30;
+let targets = [], finaleLampSize = 20;
+
+const lamps = [];          // lamps on the lake (arriving or lit)
+const pending = [];        // lamps waiting for their arrival moment
+const ripples = [];
+const sparks = [];
+const known = new Set();
+let lastSpawn = 0;
+let litCount = 0;          // lamps whose flame has caught
+let light = 0;             // smoothed light level 0..1
+let moonPulse = 0;
+let mistAmount = 1;
+let nextBeat = 0;
+let finale = null;         // { t0, at } once triggered
+let formed = false;
+let qrVisible = true, qrAlpha = 0;
+let connectionOk = true;
+let started = false;
+let showHelp = false;
+let now = 0;
+let fpsShown = 0, fpsFrames = 0, fpsT0 = 0;
+
+const ease = t => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+const easeOut = t => 1 - Math.pow(1 - t, 3);
+const clamp01 = v => Math.max(0, Math.min(1, v));
+const lerp = (a, b, t) => a + (b - a) * t;
+
+// ---------- Layout ----------
+function resize() {
+  DPR = Math.min(window.devicePixelRatio || 1, 1.5);
+  W = window.innerWidth; H = window.innerHeight;
+  canvas.width = Math.round(W * DPR);
+  canvas.height = Math.round(H * DPR);
+  canvas.style.width = W + 'px';
+  canvas.style.height = H + 'px';
+  BASE = H * 0.047;
+  scene.resize(W, H);
+  resizeLightMap();
+  targets = wordTargets(WORD, N, W, H);
+  finaleLampSize = wordSpacing(WORD, N, W, H) * 0.78;
+  if (finale) {
+    for (const L of lamps) { const p = slotPos(L); L.from = { x: p.x, y: p.y, s: p.s }; }
+    assignTargets();
+  }
+  buildQR();
+}
+
+function slotPos(lamp) {
+  const s = SLOTS[lamp.slot];
+  return { x: s.x * W, y: s.y * H, s: BASE * s.s };
+}
+
+// ---------- Lamps arriving ----------
+function addLamps(rows, initial) {
+  for (const r of rows) {
+    if (known.has(r.id) || r.id > N) continue;
+    known.add(r.id);
+    if (initial) placeLit(r); else pending.push(r);
+  }
+  if (initial && litCount >= N) { formNow(); }
+}
+
+function makeLamp(r) {
+  return {
+    id: r.id,
+    nick: r.nickname || '',
+    slot: ORDER[(r.id - 1) % N],
+    seed: Math.random() * 100,
+    jx: (Math.random() - 0.5) * 0.36,   // resting offset in the WELCOME formation
+    jy: (Math.random() - 0.5) * 0.3,
+    sizeVar: 0.88 + Math.random() * 0.24,
+    t0: now,
+    state: 'arriving',
+    lit: 0,
+    flare: 0,
+    landed: false,
+  };
+}
+
+function placeLit(r) {
+  const L = makeLamp(r);
+  L.state = 'lit'; L.lit = 1; L.t0 = now - 100;
+  lamps.push(L);
+  litCount++;
+}
+
+function spawn(r) {
+  const L = makeLamp(r);
+  const p = slotPos(L);
+  const w = wickPos(p.x, p.y, p.s);
+  const final = r.id >= N;
+  L.sparkDur = final ? 2.2 : r.id >= N - 4 ? 1.6 : 1.25;
+  L.sx = W * 0.5 + (w.x - W * 0.5) * 0.35 + (Math.random() - 0.5) * W * 0.1;
+  L.sy = H + 20;
+  L.cx = (L.sx + w.x) / 2 + (Math.random() - 0.5) * W * 0.15;
+  L.cy = Math.min(L.sy, w.y) - H * (final ? 0.35 : 0.18);
+  lamps.push(L);
+  audio.rise((w.x / W) * 2 - 1);
+}
+
+function processQueue() {
+  if (!pending.length || finale) return;
+  const next = pending[0];
+  let gap = pending.length > 10 ? 0.28 : pending.length > 4 ? 0.45 : 0.7;
+  if (next.id >= N - 4) gap = Math.max(gap, 1.8);
+  if (next.id === N) gap = 2.6;
+  if (now - lastSpawn < gap) return;
+  lastSpawn = now;
+  spawn(pending.shift());
+}
+
+function ignite(L, p) {
+  litCount++;
+  const w = wickPos(p.x, p.y, p.s);
+  ripples.push({ x: p.x, y: p.y, s: p.s, t0: now, dur: 2.2 });
+  ripples.push({ x: p.x, y: p.y, s: p.s, t0: now + 0.35, dur: 2.4 });
+  for (let i = 0; i < 9; i++) {
+    sparks.push({ x: w.x, y: w.y, vx: (Math.random() - 0.5) * p.s * 2.2, vy: -p.s * (0.8 + Math.random() * 1.6), t0: now, life: 0.8 + Math.random() * 0.7, size: p.s * 0.25 });
+  }
+  audio.ignite((p.x / W) * 2 - 1, SLOTS[L.slot].s / 1.3);
+  if (MILESTONES.includes(L.id)) {
+    audio.milestone();
+    moonPulse = 1;
+    ripples.push({ lake: true, t0: now, dur: 5 });
+  }
+  if (litCount >= N && !finale) {
+    finale = { at: now + 3.4, t0: null };
+    audio.hush(3.4);
+  }
+}
+
+// ---------- Finale ----------
+function assignTargets() {
+  const from = lamps.map(L => L.from);
+  const match = matchTargets(from, targets);
+  lamps.forEach((L, i) => { L.target = match[i]; });
+}
+
+function startFinale() {
+  finale.t0 = now;
+  lamps.sort((a, b) => a.id - b.id);
+  for (const L of lamps) {
+    const p = slotPos(L);
+    L.from = { x: p.x, y: p.y, s: p.s };
+    L.state = 'lit'; L.lit = 1;
+  }
+  assignTargets();
+  for (const L of lamps) {
+    const t = targets[L.target];
+    L.delay = Math.abs(t.x / W - 0.5) * 1.8 + Math.random() * 0.9;
+    L.dur = 6.2 + Math.random() * 1.6;
+    L.sway = (Math.random() - 0.5) * W * 0.06;
+    L.landed = false;
+  }
+  scene.batsEnabled = false;
+  audio.finale(9.4);
+}
+
+function formNow() {
+  finale = { at: 0, t0: now - 100 };
+  lamps.sort((a, b) => a.id - b.id);
+  for (const L of lamps) {
+    const p = slotPos(L);
+    L.from = { x: p.x, y: p.y, s: p.s };
+    L.delay = 0; L.dur = 1; L.sway = 0; L.landed = true;
+  }
+  assignTargets();
+  formed = true;
+  scene.batsEnabled = false;
+}
+
+function replayFinale() {
+  if (litCount < N) return;
+  finale = { at: now + 1.5, t0: null };
+  formed = false;
+  for (const L of lamps) L.landed = false;
+  audio.hush(1.5);
+}
+
+function formedFloat(L, t, sp) {
+  const swell = Math.sin(now * 0.55 - (t.x / W) * 7) * sp * 0.16;
+  return {
+    x: L.jx * sp + Math.sin(now * 0.31 + L.seed) * sp * 0.12 + Math.sin(now * 0.13 + L.seed * 3) * sp * 0.06,
+    y: L.jy * sp + swell + Math.cos(now * 0.27 + L.seed * 1.3) * sp * 0.08,
+  };
+}
+
+// Where a lamp is right now (handles bobbing and the finale journey).
+function lampPos(L) {
+  const bob = Math.sin(now * 0.9 + L.seed) * 0.5 + Math.sin(now * 0.37 + L.seed * 2) * 0.5;
+  if (finale && finale.t0 !== null && L.from) {
+    const t = targets[L.target];
+    const p = clamp01((now - finale.t0 - L.delay) / L.dur);
+    const e = ease(p);
+    if (p >= 1 && !L.landed) {
+      L.landed = true;
+      audio.sparkle((t.x / W) * 2 - 1);
+      ripples.push({ x: t.x, y: t.y, s: finaleLampSize, t0: now, dur: 1.6 });
+    }
+    // Lamps on water never sit in perfect lines: each has a small random
+    // offset, its own slow drift, and a gentle swell rolls through the word.
+    const sp = finaleLampSize;
+    const drift = formedFloat(L, t, sp);
+    const s = lerp(L.from.s, sp * L.sizeVar, e);
+    return {
+      x: lerp(L.from.x, t.x + drift.x, e) + Math.sin(p * Math.PI) * L.sway,
+      y: lerp(L.from.y, t.y + drift.y, e) + bob * s * 0.04,
+      s,
+      p,
+    };
+  }
+  const sp = slotPos(L);
+  return { x: sp.x + Math.sin(now * 0.21 + L.seed) * sp.s * 0.06, y: sp.y + bob * sp.s * 0.05, s: sp.s, p: 0 };
+}
+
+// ---------- Drawing ----------
+function drawSpark(L, p) {
+  const w = wickPos(p.x, p.y, p.s);
+  const k = clamp01((now - L.t0) / L.sparkDur);
+  const at = u => {
+    const e = ease(u);
+    const a = (1 - e) * (1 - e), b = 2 * (1 - e) * e, c = e * e;
+    return { x: a * L.sx + b * L.cx + c * w.x, y: a * L.sy + b * L.cy + c * w.y };
+  };
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  for (let i = 12; i >= 0; i--) {
+    const u = k - i * 0.018;
+    if (u <= 0) continue;
+    const q = at(u);
+    const sz = BASE * (0.7 - i * 0.045) * (L.id >= N ? 1.6 : 1);
+    ctx.globalAlpha = (1 - i / 13) * 0.85;
+    ctx.drawImage(ember, q.x - sz / 2, q.y - sz / 2, sz, sz);
+  }
+  const head = at(k);
+  ctx.globalAlpha = 0.5;
+  const big = BASE * 3 * (L.id >= N ? 1.8 : 1);
+  ctx.drawImage(glow, head.x - big / 2, head.y - big / 2, big, big);
+  ctx.restore();
+}
+
+// Pre-drawn lamp body and flame, reused for every lamp (much faster than
+// redrawing 140 detailed lamps each frame).
+const S0 = 180;
+const BODY = (() => {
+  const c = document.createElement('canvas');
+  c.width = Math.ceil(S0 * 1.3); c.height = Math.ceil(S0 * 0.7);
+  const g = c.getContext('2d');
+  const ox = S0 * 0.64, oy = S0 * 0.54;
+  drawWaterContact(g, ox, oy, S0, 1);
+  drawLampBody(g, ox, oy, S0, 1, 1);
+  return { c, ox, oy };
+})();
+const H0 = 160;
+const FLAME = (() => {
+  const c = document.createElement('canvas');
+  c.width = Math.ceil(H0 * 0.9); c.height = Math.ceil(H0 * 1.15);
+  const g = c.getContext('2d');
+  const bx = c.width / 2, by = H0 * 1.07;
+  drawFlame(g, bx, by, H0, 0, 1);
+  return { c, bx, by };
+})();
+
+// Low-resolution light layer: all lamp glows are painted here, then
+// stretched over the scene in one go.
+const LM = 0.2;
+let lm = null, lctx = null;
+function resizeLightMap() {
+  lm = document.createElement('canvas');
+  lm.width = Math.ceil(W * LM); lm.height = Math.ceil(H * LM);
+  lctx = lm.getContext('2d');
+}
+
+function lampLook(L, p, intensity) {
+  const age = now - L.t0;
+  let bodyA = 1, flameK = L.lit;
+  if (L.state === 'arriving') {
+    const k = age - L.sparkDur;
+    bodyA = clamp01((k + 0.15) / 0.35);
+    flameK = clamp01(k / 0.6);
+  }
+  const w = wickPos(p.x, p.y, p.s);
+  const flick = 1 + 0.07 * wobble(now, L.seed) + 0.03 * Math.sin(now * 31 + L.seed);
+  const fh = p.s * 0.95 * flameK * flick * (1 + L.flare * 0.6) * intensity;
+  const lean = 0.08 * wobble(now * 0.6, L.seed + 9);
+  return { bodyA, flameK, w, flick, fh, lean };
+}
+
+// Pass 1: lamp body + its glow into the light layer.
+function drawLampBodyPass(L, p, intensity) {
+  if (L.state === 'arriving') {
+    const k = now - L.t0 - L.sparkDur;
+    L.flare = k > 0 ? Math.max(0, 1 - k / 1.2) : 0;
+    if (k >= 0.6) { L.state = 'lit'; L.lit = 1; }
+  } else if (L.flare > 0) {
+    L.flare = Math.max(0, L.flare - 0.016);
+  }
+  const o = lampLook(L, p, intensity);
+  if (o.bodyA <= 0) return;
+  if (o.flameK >= 1 && o.bodyA >= 1) {
+    const k = p.s / S0;
+    ctx.drawImage(BODY.c, p.x - BODY.ox * k, p.y - BODY.oy * k, BODY.c.width * k, BODY.c.height * k);
+  } else {
+    drawWaterContact(ctx, p.x, p.y, p.s, o.bodyA);
+    drawLampBody(ctx, p.x, p.y, p.s, 0.25 + 0.75 * o.flameK, o.bodyA);
+  }
+  if (o.flameK > 0) {
+    const g1 = p.s * (4.2 + L.flare * 5) * (0.8 + 0.2 * o.flick) * LM;
+    lctx.globalAlpha = Math.min(1, 0.45 * o.flameK * Math.min(1.4, intensity));
+    lctx.drawImage(glow, o.w.x * LM - g1 / 2, (o.w.y - o.fh * 0.4) * LM - g1 / 2, g1, g1);
+    const g2 = p.s * 11 * LM;
+    lctx.globalAlpha = 0.05 * o.flameK * intensity;
+    lctx.drawImage(glow, o.w.x * LM - g2 / 2, o.w.y * LM - g2 / 2, g2, g2);
+  }
+}
+
+// Pass 2: the flame itself (drawn after the glow so it stays crisp).
+function drawLampFlamePass(L, p, intensity) {
+  const o = lampLook(L, p, intensity);
+  if (o.flameK <= 0 || o.bodyA <= 0 || o.fh < 0.5) return;
+  const k = o.fh / H0;
+  ctx.save();
+  ctx.globalAlpha = o.flameK;
+  ctx.translate(o.w.x, o.w.y);
+  ctx.transform(1, 0, -o.lean, 1, 0, 0);
+  ctx.scale(k, k);
+  ctx.drawImage(FLAME.c, -FLAME.bx, -FLAME.by);
+  ctx.restore();
+}
+
+function drawNickname(L, p) {
+  if (!L.nick || L.state === 'arriving' && now - L.t0 < L.sparkDur) return;
+  const age = now - L.t0 - (L.sparkDur || 0);
+  const DUR = 4.6;
+  if (age < 0 || age > DUR) return;
+  const a = Math.min(1, age / 0.4) * (age > DUR - 1.3 ? (DUR - age) / 1.3 : 1);
+  const size = Math.round(H * 0.022 + p.s * 0.22);
+  const y = p.y - p.s * 1.5 - easeOut(age / DUR) * H * 0.05;
+  ctx.save();
+  ctx.font = `600 ${size}px Cinzel, Georgia, serif`;
+  try { ctx.letterSpacing = `${Math.round(size * 0.18)}px`; } catch { /* older browsers */ }
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'alphabetic';
+  ctx.globalAlpha = a;
+  ctx.shadowColor = 'rgba(255,170,70,0.9)';
+  ctx.shadowBlur = size * 0.8;
+  ctx.fillStyle = 'rgba(255,232,190,1)';
+  ctx.fillText(L.nick, p.x + p.s * 0.3, y);
+  ctx.shadowBlur = 0;
+  ctx.restore();
+}
+
+function drawRipples() {
+  ctx.save();
+  for (let i = ripples.length - 1; i >= 0; i--) {
+    const r = ripples[i];
+    const k = (now - r.t0) / r.dur;
+    if (k < 0) continue;
+    if (k >= 1) { ripples.splice(i, 1); continue; }
+    if (r.lake) {
+      const rx = W * (0.05 + easeOut(k) * 0.75);
+      ctx.globalAlpha = (1 - k) * 0.25;
+      ctx.strokeStyle = 'rgb(255,215,160)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.ellipse(W / 2, H * 0.72, rx, rx * 0.16, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      continue;
+    }
+    const rx = r.s * (0.6 + easeOut(k) * 2.4);
+    ctx.globalAlpha = (1 - k) * 0.4;
+    ctx.strokeStyle = 'rgb(255,205,140)';
+    ctx.lineWidth = Math.max(1, r.s * 0.03);
+    ctx.beginPath();
+    ctx.ellipse(r.x, r.y, rx, rx * 0.2, 0, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawSparks(dt) {
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  for (let i = sparks.length - 1; i >= 0; i--) {
+    const s = sparks[i];
+    const k = (now - s.t0) / s.life;
+    if (k >= 1) { sparks.splice(i, 1); continue; }
+    s.x += s.vx * dt; s.y += s.vy * dt;
+    s.vy += (s.rise ? -4 : 30) * dt;
+    s.vx *= 0.985;
+    const sz = s.size * (1 - k * 0.6);
+    ctx.globalAlpha = (1 - k) * (s.rise ? 0.7 : 0.9);
+    ctx.drawImage(ember, s.x - sz, s.y - sz, sz * 2, sz * 2);
+  }
+  ctx.restore();
+}
+
+// ---------- QR code ----------
+let qrCanvas = null;
+function guestUrl() {
+  let url = CONFIG.GUEST_URL || new URL('./', location.href).href;
+  if (MODE === 'local' && !url.includes('local')) url += (url.includes('?') ? '&' : '?') + 'local';
+  return url;
+}
+function buildQR() {
+  if (!window.qrcode) { qrCanvas = null; return; }
+  const qr = window.qrcode(0, 'M');
+  qr.addData(guestUrl());
+  qr.make();
+  const n = qr.getModuleCount();
+  const size = Math.round(H * 0.15);
+  const pad = Math.round(size * 0.09);
+  const c = document.createElement('canvas');
+  c.width = c.height = size + pad * 2;
+  const g = c.getContext('2d');
+  const r = pad * 1.2;
+  g.fillStyle = 'rgba(246,236,214,0.94)';
+  g.beginPath();
+  g.roundRect ? g.roundRect(0, 0, c.width, c.height, r) : g.rect(0, 0, c.width, c.height);
+  g.fill();
+  const cell = size / n;
+  g.fillStyle = '#1b130c';
+  for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+    if (qr.isDark(y, x)) g.fillRect(pad + x * cell, pad + y * cell, Math.ceil(cell), Math.ceil(cell));
+  }
+  qrCanvas = c;
+}
+function drawQR(dt) {
+  const target = qrVisible && !finale ? 1 : 0;
+  qrAlpha += (target - qrAlpha) * Math.min(1, dt * 2);
+  if (!qrCanvas || qrAlpha < 0.01) return;
+  const m = H * 0.035;
+  const x = W - qrCanvas.width - m, y = H - qrCanvas.height - m;
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.globalAlpha = qrAlpha * (0.18 + 0.05 * Math.sin(now * 1.5));
+  const gs = qrCanvas.width * 2.2;
+  ctx.drawImage(glow, x + qrCanvas.width / 2 - gs / 2, y + qrCanvas.height / 2 - gs / 2, gs, gs);
+  ctx.restore();
+  ctx.globalAlpha = qrAlpha;
+  ctx.drawImage(qrCanvas, x, y);
+  ctx.globalAlpha = 1;
+}
+
+// ---------- Operator overlay (only shown when H is pressed) ----------
+function drawOperator() {
+  if (!connectionOk) {
+    ctx.fillStyle = 'rgba(255,60,60,0.7)';
+    ctx.beginPath(); ctx.arc(14, 14, 5, 0, Math.PI * 2); ctx.fill();
+  }
+  if (!showHelp) return;
+  const lines = [
+    `Lamps lit: ${litCount} / ${N}   ·   waiting: ${pending.length}   ·   mode: ${MODE}   ·   ${fpsShown} fps`,
+    `Guest link: ${guestUrl()}`,
+    'F fullscreen · M mute · Q show/hide QR · H hide this panel',
+    MODE === 'demo' ? 'Space add a lamp · D pause/resume demo' : '',
+    'Shift+R replay finale (after all lamps are lit)',
+  ].filter(Boolean);
+  ctx.save();
+  ctx.font = '15px system-ui, sans-serif';
+  const w = Math.max(...lines.map(l => ctx.measureText(l).width)) + 32;
+  ctx.fillStyle = 'rgba(0,0,0,0.75)';
+  ctx.fillRect(16, 16, w, lines.length * 24 + 20);
+  ctx.fillStyle = '#f3e6c8';
+  lines.forEach((l, i) => ctx.fillText(l, 32, 42 + i * 24));
+  ctx.restore();
+}
+
+// ---------- Main loop ----------
+let lastT = performance.now() / 1000;
+function frame() {
+  const t = performance.now() / 1000;
+  const dt = Math.min(0.05, t - lastT);
+  lastT = t; now = t;
+  fpsFrames++;
+  if (t - fpsT0 >= 1) { fpsShown = Math.round(fpsFrames / (t - fpsT0)); fpsFrames = 0; fpsT0 = t; }
+
+  processQueue();
+  if (finale && finale.t0 === null && now >= finale.at) startFinale();
+
+  // Light, mist and moon follow the number of lit lamps.
+  const targetLight = finale && finale.t0 !== null ? 1.15 : litCount / N;
+  light += (targetLight - light) * Math.min(1, dt * 0.9);
+  const mistTarget = finale && finale.t0 !== null ? 0 : 1 - Math.pow(litCount / N, 0.8) * 0.8;
+  mistAmount += (mistTarget - mistAmount) * Math.min(1, dt * 0.6);
+  moonPulse = Math.max(0, moonPulse - dt * 0.4);
+
+  // Heartbeat for the last five lamps.
+  if (!finale && litCount >= N - 5 && litCount < N && now >= nextBeat) {
+    audio.heartbeat();
+    moonPulse = Math.max(moonPulse, 0.5);
+    nextBeat = now + 1.45;
+  }
+  audio.setLight(Math.min(1, light));
+  const moonGlow = Math.min(1.4, light * 0.5 + moonPulse * 0.5 + (formed ? 0.4 : 0));
+
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  scene.drawBack(ctx, now, dt, Math.min(1, light), moonGlow);
+  scene.drawMist(ctx, dt, mistAmount, true);
+
+  // Positions this frame
+  const placed = lamps.map(L => ({ L, p: lampPos(L) }));
+  placed.sort((a, b) => a.p.y - b.p.y);
+
+  // A slow wave of brightness travels across the finished word.
+  const allDone = finale && finale.t0 !== null && lamps.every(L => L.landed);
+  if (allDone && !formed) formed = true;
+  const intensityOf = p => {
+    if (!formed) return 1;
+    const wave = ((now * 0.12) % 1.6) - 0.3;
+    const d = p.x / W - wave;
+    return 1.15 + 0.45 * Math.exp(-d * d * 60);
+  };
+
+  // Reflections first (they sit on the water under every lamp).
+  for (const { L, p } of placed) {
+    let k = L.state === 'lit' ? 1 : clamp01((now - L.t0 - L.sparkDur) / 0.6);
+    if (k > 0) drawReflection(ctx, glow, p.x, p.y, p.s, now, L.seed, k * intensityOf(p));
+  }
+  drawRipples();
+
+  lctx.setTransform(1, 0, 0, 1, 0, 0);
+  lctx.clearRect(0, 0, lm.width, lm.height);
+  lctx.globalCompositeOperation = 'lighter';
+  const shown = [];
+  for (const { L, p } of placed) {
+    let inten = 1;
+    if (L.state === 'arriving') {
+      const age = now - L.t0;
+      if (age < L.sparkDur) drawSpark(L, p);
+      if (age >= L.sparkDur && !L.ignited) { L.ignited = true; ignite(L, p); }
+      if (age < L.sparkDur - 0.15) continue;
+    } else inten = intensityOf(p);
+    drawLampBodyPass(L, p, inten);
+    shown.push([L, p, inten]);
+  }
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.drawImage(lm, 0, 0, W, H);
+  ctx.restore();
+  for (const [L, p, inten] of shown) drawLampFlamePass(L, p, inten);
+  for (const { L, p } of placed) drawNickname(L, p);
+
+  // Rising embers once WELCOME is formed.
+  if (formed && Math.random() < dt * 14 && lamps.length) {
+    const L = lamps[Math.floor(Math.random() * lamps.length)];
+    const p = lampPos(L);
+    const w = wickPos(p.x, p.y, p.s);
+    sparks.push({ x: w.x, y: w.y - p.s * 0.6, vx: (Math.random() - 0.5) * 12, vy: -(20 + Math.random() * 40), t0: now, life: 2.5 + Math.random() * 2.5, size: p.s * 0.18, rise: true });
+  }
+  drawSparks(dt);
+
+  scene.drawMist(ctx, dt, mistAmount, false);
+  scene.drawFireflies(ctx, now, 1 - (formed ? 0.5 : 0));
+  scene.drawFront(ctx);
+  drawQR(dt);
+  drawOperator();
+
+  requestAnimationFrame(frame);
+}
+
+// ---------- Demo mode (offline backup / rehearsal) ----------
+const DEMO_NAMES = ['NIMA', 'KASU', 'RAVI', 'SAMA', 'AMI', 'TOM', 'DILU', 'JO', 'MAYA', 'ARUN', 'LEO', 'ISHA', 'KAVI', 'ROSE', 'BEN', 'ZARA', 'MALI', 'SUNI', 'OWL', 'BOO', 'NILA', 'PRIA', 'DEV', 'ANU', 'CHAM', 'HIRU', 'SHAN', 'GIGI', 'MOON', 'KIT'];
+let demoId = 0, demoOn = false, demoTimer = null;
+function demoAdd() {
+  if (demoId >= N) return;
+  demoId++;
+  addLamps([{ id: demoId, nickname: DEMO_NAMES[Math.floor(Math.random() * DEMO_NAMES.length)] }], false);
+}
+function demoLoop() {
+  clearTimeout(demoTimer);
+  if (!demoOn || demoId >= N) return;
+  demoAdd();
+  const fast = params.get('demo') === 'fast';
+  demoTimer = setTimeout(demoLoop, fast ? 80 + Math.random() * 300 : 250 + Math.random() * 1300);
+}
+
+// ---------- Start ----------
+function begin() {
+  if (started) return;
+  started = true;
+  audio.start();
+  document.getElementById('start').classList.add('hidden');
+  try { document.documentElement.requestFullscreen && document.documentElement.requestFullscreen(); } catch { /* ignore */ }
+  if (MODE === 'demo') { demoOn = true; demoLoop(); }
+}
+
+document.getElementById('start').addEventListener('click', begin);
+window.addEventListener('keydown', e => {
+  const k = e.key.toLowerCase();
+  if (!started && (k === 'enter' || k === ' ')) { begin(); return; }
+  if (k === 'f') {
+    if (document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen();
+  } else if (k === 'm') audio.toggleMute();
+  else if (k === 'q') qrVisible = !qrVisible;
+  else if (k === 'h') showHelp = !showHelp;
+  else if (k === 'r' && e.shiftKey) replayFinale();
+  else if (MODE === 'demo' && k === ' ') { e.preventDefault(); demoAdd(); }
+  else if (MODE === 'demo' && k === 'd') { demoOn = !demoOn; demoLoop(); }
+});
+
+// Hide the mouse cursor when it is idle.
+let cursorTimer;
+window.addEventListener('mousemove', () => {
+  document.body.classList.remove('nocursor');
+  clearTimeout(cursorTimer);
+  cursorTimer = setTimeout(() => document.body.classList.add('nocursor'), 2500);
+});
+
+window.addEventListener('resize', resize);
+
+const modeNote = {
+  supabase: 'Live mode — connected to Supabase.',
+  local: 'Local test mode — open the guest page with ?local in this same browser.',
+  demo: 'Demo mode — fake guests will light lamps automatically.',
+}[MODE];
+document.getElementById('mode').textContent = modeNote;
+
+(document.fonts ? document.fonts.load('600 40px Cinzel').catch(() => {}) : Promise.resolve()).finally(() => {
+  resize();
+  if (MODE !== 'demo') {
+    watchLamps({
+      onLamps: addLamps,
+      onStatus: ok => { connectionOk = ok; },
+      onReset: () => location.reload(),
+    });
+  }
+  requestAnimationFrame(frame);
+});
+
+// Test hook for automated checks.
+window.__lake = { get litCount() { return litCount; }, get formed() { return formed; }, get lamps() { return lamps.length; }, addLamps, demoAdd, begin };
