@@ -265,10 +265,19 @@ async function release(isRetry = false) {
     fly = { t0: now, dir: 'down' };
     setStep('full');
   } else {
-    // Name refused by the server: back to the name step.
+    // Name refused by the server: back to the name step, keeping the name
+    // so the guest can edit it, with a clear reason.
     fly = { t0: now, dir: 'down' };
-    nickError.textContent = 'Please choose a different name.';
-    nickInput.value = '';
+    if (result.error === 'blocked_nickname') {
+      nickError.textContent = 'Please choose a different name.';
+      nickInput.value = '';
+    } else if (result.error === 'bad_nickname' && nickname.length > 4) {
+      // The database still has the old 4-letter limit (schema.sql not re-run).
+      nickError.textContent = 'Please use a shorter name (up to 4 letters).';
+      console.warn('Server refused a', nickname.length, 'letter name — re-run supabase/schema.sql');
+    } else {
+      nickError.textContent = 'Please use letters only.';
+    }
     updateContinue();
     flameK = 0; hold = 0;
     setStep('name');
