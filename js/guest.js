@@ -151,11 +151,14 @@ function attachMotion() {
   setTimeout(updateShakeHint, 2000);
 }
 
-// iPhones must ask permission from a tap (click). Android needs no prompt.
-let motionAsking = false;
+// Always listen straight away: most phones send motion with no prompt.
+// Some browsers (iPhones, and a few Android browsers) also offer a
+// permission step; on those we also ask from a tap, which only matters if no
+// motion is arriving yet.
+let motionAsking = false, motionGranted = false;
 function enableMotion() {
-  if (motionOn || motionAsking) return;
-  if (!needsPermission()) { attachMotion(); return; }
+  attachMotion();
+  if (!needsPermission() || motionLive || motionGranted || motionAsking) return;
   const DO = window.DeviceOrientationEvent, DM = window.DeviceMotionEvent;
   const asks = [];
   if (DM && typeof DM.requestPermission === 'function') asks.push(DM.requestPermission().catch(() => 'denied'));
@@ -163,15 +166,17 @@ function enableMotion() {
   motionAsking = true;
   Promise.all(asks).then(r => {
     motionAsking = false;
-    if (r.includes('granted')) attachMotion();
-    else { motionDenied = true; updateShakeHint(); }
+    if (r.includes('granted')) motionGranted = true;
+    else if (!motionLive) motionDenied = true;
+    updateShakeHint();
+    setTimeout(updateShakeHint, 1500);
   });
 }
 
 const shakeHint = document.getElementById('shakeHint');
 function updateShakeHint() {
   if (motionLive) shakeHint.textContent = 'Gently shake your phone ✦';
-  else if (needsPermission() && !motionOn && !motionDenied) shakeHint.textContent = 'Tap here, then gently shake your phone ✦';
+  else if (needsPermission() && !motionGranted && !motionDenied) shakeHint.textContent = 'Tap here, then gently shake your phone ✦';
   else shakeHint.textContent = 'Touch and drag near your flame ✦';
 }
 shakeHint.addEventListener('click', () => enableMotion());
@@ -468,7 +473,7 @@ function frame() {
   if (DEBUG && Math.floor(now * 5) !== Math.floor((now - dt) * 5)) {
     const f = v => (v >= 0 ? ' ' : '') + v.toFixed(2);
     debugEl.textContent =
-      `permission API: ${needsPermission() ? 'yes (iPhone)' : 'no'}  listening: ${motionOn}  denied: ${motionDenied}\n` +
+      `permission step: ${needsPermission() ? 'yes' : 'no'}  granted: ${motionGranted}  denied: ${motionDenied}\n` +
       `events: ${motionEvents}  shake: ${f(hp.x)} ${f(hp.y)} ${f(hp.z)}\n` +
       `gravity: ${f(grav.x)} ${f(grav.y)} ${f(grav.z)}  sign: ${gSign}\n` +
       `lean: ${f(lean)}  flutter: ${f(flutter)}`;
@@ -480,8 +485,8 @@ function frame() {
 // ---------- Start ----------
 function init() {
   resize();
-  if (!needsPermission()) attachMotion();
-  else updateShakeHint();
+  attachMotion();
+  if (needsPermission()) updateShakeHint();
   let keep = null;
   try { keep = JSON.parse(localStorage.getItem(KEEP) || 'null'); } catch { /* ignore */ }
   if (keep && keep.lamp) {
