@@ -9,11 +9,15 @@ A digital lamp-lighting ceremony for 140 guests, set on a haunted Halloween lake
 ### What's on the big screen
 - **Scene:** a misty, moonlit lake framed by two gnarled, claw-branched trees. One branch crosses the moon.
 - **Lights:** jack-o'-lanterns glow on the near bank, smaller ones dot the far shore, and a haunted house there has flickering windows.
+- **Trees:** new spooky trees every time the screen opens (set `SCENE_SEED` in `js/config.js` to keep the same ones).
 - **Creatures:**
-  - an owl with blinking eyes and a spider that slowly lowers itself on its thread
+  - owls that come and go, flying in to land on branches and flying off again, plus a spider that slowly lowers itself on its thread
+  - every few minutes, a skeleton claws its way out of the pumpkin bank, rattles along it, and tumbles into the lake with a splash (its skull bobs up once)
   - bat flocks, plus a witch (with her cat) crossing the moon halfway through and now and then
   - a faint ghost drifting through the mist, and will-o'-the-wisps over the water that fade as the lake fills with light
 - **Wind:** a gust every half-minute or so bends every flame and blows a few leaves across.
+- **Water:** reflects the sky and shoreline, with moving ripples and a twinkling moonlight path. A slow camera drift moves near things more than far things, which adds depth.
+- **Speed:** if the laptop struggles, the screen automatically renders at a slightly lower resolution. The operator panel (`H`) shows the frame rate and quality.
 - **Shake mirroring:** when a guest shakes their phone, *their* lamp on the big screen flutters and sparks, and their nickname glows again.
 
 ---
@@ -114,8 +118,8 @@ The operator panel (`H`) shows "last lamp check: Ns ago". It should stay at 0–
 index.html, css/guest.css, js/guest.js   Guest phone page
 screen.html, css/screen.css, js/screen.js Big screen
 js/scene.js       Sky, moon, far shore, water, mist, fireflies
-js/halloween.js   Spooky trees, owl, spider, pumpkins, haunted house,
-                  witch, bats, ghost, wisps, wind and leaves
+js/halloween.js   Spooky trees, owls, spider, pumpkins, haunted house,
+                  witch, bats, ghost, wisps, skeleton, wind and leaves
 js/lamp-art.js    Clay lamp + flame drawing (shared)
 js/layout.js      Lamp positions, WELCOME letter shapes (shared)
 js/audio.js       Generated sound

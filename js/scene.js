@@ -1,27 +1,38 @@
-// The night lake: sky, moon, stars, bare-tree shoreline, water,
-// reflections, mist, fireflies and foreground reeds, plus the Halloween
-// layer (trees, pumpkins, owl, witch, bats, ghost, wisps, wind).
+// The night lake: sky, moon, stars, far shore, water (sky reflection, ripples,
+// moonlight glitter path), mist, fireflies and reeds — plus the Halloween
+// layer. A very slow camera drift moves near things more than far things,
+// which gives the scene depth.
 
 import { HORIZON, rng } from './layout.js';
 import { makeGlow } from './lamp-art.js';
 import { Halloween } from './halloween.js';
 
 const lerp = (a, b, t) => a + (b - a) * t;
-const mix = (c1, c2, t) => `rgb(${Math.round(lerp(c1[0], c2[0], t))},${Math.round(lerp(c1[1], c2[1], t))},${Math.round(lerp(c1[2], c2[2], t))})`;
+const mixc = (c1, c2, t) => [lerp(c1[0], c2[0], t), lerp(c1[1], c2[1], t), lerp(c1[2], c2[2], t)];
+const css = (c, a = 1) => `rgba(${Math.round(c[0])},${Math.round(c[1])},${Math.round(c[2])},${a})`;
+
+// Night palette (L = 0: dark lake, L = 1: lake full of light).
+// Lifted a little so black silhouettes stand out, even on a projector.
+const SKY_TOP = [[8, 10, 30], [12, 14, 38]];
+const SKY_MID = [[22, 24, 62], [36, 30, 72]];
+const SKY_LOW = [[54, 44, 92], [96, 64, 92]];
 
 export class Scene {
-  constructor() {
+  constructor(seed) {
+    this.seed = seed || ((Math.random() * 1e9) | 0);   // new trees each time the screen opens
     this.moonGlow = makeGlow(256, [[0, 'rgba(255,246,220,0.9)'], [0.12, 'rgba(240,230,210,0.35)'], [0.4, 'rgba(160,170,210,0.08)'], [1, 'rgba(120,130,190,0)']]);
     this.mistSprite = makeGlow(256, [[0, 'rgba(178,186,214,0.9)'], [0.5, 'rgba(160,170,205,0.35)'], [1, 'rgba(150,160,200,0)']]);
-    this.cloudSprite = makeGlow(256, [[0, 'rgba(14,16,34,0.95)'], [0.6, 'rgba(14,16,34,0.4)'], [1, 'rgba(14,16,34,0)']]);
+    this.cloudSprite = makeGlow(256, [[0, 'rgba(20,22,46,0.95)'], [0.6, 'rgba(20,22,46,0.4)'], [1, 'rgba(20,22,46,0)']]);
     this.flyGlow = makeGlow(64, [[0, 'rgba(230,255,160,1)'], [0.3, 'rgba(200,255,120,0.35)'], [1, 'rgba(160,240,90,0)']]);
-    this.hw = new Halloween();
+    this.glint = makeGlow(64, [[0, 'rgba(255,252,240,1)'], [0.35, 'rgba(235,235,255,0.55)'], [1, 'rgba(200,210,255,0)']]);
+    this.hw = new Halloween(this.seed);
+    this.cam = { x: 0, y: 0 };
   }
 
   // Height of the far shore at x (shared by trees, pumpkins and the house).
   shoreY(x) {
     const { W, H, hy } = this;
-    const edge = Math.pow(Math.abs(x / W - 0.5) * 2, 2);
+    const edge = Math.pow(Math.min(1, Math.abs(x / W - 0.5) * 2), 2);
     return hy - H * (0.006 + 0.012 * Math.sin(x * 0.004 + 1) ** 2 + 0.035 * edge);
   }
 
@@ -30,22 +41,27 @@ export class Scene {
     this.hy = H * HORIZON;
     const rand = rng(77);
 
-    // Stars
     this.stars = [];
-    for (let i = 0; i < 260; i++) {
+    for (let i = 0; i < 300; i++) {
       const y = Math.pow(rand(), 1.4) * this.hy * 0.95;
-      this.stars.push({ x: rand() * W, y, r: rand() < 0.1 ? 1.6 : 0.6 + rand() * 0.8, a: 0.25 + rand() * 0.6, tw: 0.5 + rand() * 2.5, ph: rand() * 6.28 });
+      this.stars.push({ x: rand() * W * 1.04 - W * 0.02, y, r: rand() < 0.1 ? 1.8 : 0.7 + rand() * 0.9, a: 0.3 + rand() * 0.6, tw: 0.5 + rand() * 2.5, ph: rand() * 6.28 });
     }
 
-    // Moon
     this.moon = { x: W * 0.73, y: H * 0.165, r: H * 0.062 };
     this.moonDisk = this.renderMoon(this.moon.r);
 
-    // Halloween layer + shoreline with bare trees and a haunted house
     this.hw.resize(W, H, this.hy, x => this.shoreY(x), this.moon);
     this.trees = this.renderTrees(W, H);
+    this.ripples = this.renderRipples(W, H);
 
-    // Mist banks
+    // Moonlight glitter: hundreds of tiny glints on the ripples.
+    const gr = rng(this.seed + 5);
+    this.glints = Array.from({ length: 480 }, () => ({
+      u: (gr() + gr() + gr() - 1.5) / 1.5,          // across the path (bell-shaped)
+      v: gr(),                                        // along the path (far → near)
+      sp: 1.2 + gr() * 3.5, ph: gr() * 6.28, size: 0.4 + gr() * 0.8,
+    }));
+
     this.mist = [];
     for (let i = 0; i < 26; i++) {
       const far = i < 16;
@@ -60,13 +76,11 @@ export class Scene {
       });
     }
 
-    // Thin clouds near the moon
     this.clouds = [];
     for (let i = 0; i < 5; i++) {
-      this.clouds.push({ x: rand() * W, y: H * (0.06 + rand() * 0.24), w: W * (0.25 + rand() * 0.3), h: H * (0.025 + rand() * 0.03), v: 3 + rand() * 5, a: 0.35 + rand() * 0.35 });
+      this.clouds.push({ x: rand() * W, y: H * (0.06 + rand() * 0.24), w: W * (0.25 + rand() * 0.3), h: H * (0.025 + rand() * 0.03), v: 3 + rand() * 5, a: 0.3 + rand() * 0.3 });
     }
 
-    // Fireflies
     this.flies = [];
     for (let i = 0; i < 18; i++) {
       this.flies.push({ x: rand() * W, y: H * (0.47 + rand() * 0.48), ax: 20 + rand() * 60, ay: 8 + rand() * 25, fx: 0.05 + rand() * 0.15, fy: 0.07 + rand() * 0.2, ph: rand() * 6.28, bf: 0.3 + rand() * 0.6 });
@@ -74,6 +88,18 @@ export class Scene {
 
     this.reeds = this.renderReeds(W, H);
     this.vignette = this.renderVignette(W, H);
+
+    // Moonlit sky: a wide soft brightening around the moon (pre-rendered)
+    const sk = document.createElement('canvas');
+    sk.width = Math.ceil(W * 1.1); sk.height = Math.ceil(this.hy + H * 0.05);
+    const sg = sk.getContext('2d');
+    const m = this.moon;
+    const grad = sg.createRadialGradient(m.x + W * 0.05, m.y + H * 0.05, 0, m.x + W * 0.05, m.y + H * 0.05, W * 0.55);
+    grad.addColorStop(0, 'rgba(120,125,170,0.3)');
+    grad.addColorStop(1, 'rgba(60,60,110,0)');
+    sg.fillStyle = grad;
+    sg.fillRect(0, 0, sk.width, sk.height);
+    this.skyGlow = sk;
   }
 
   renderMoon(r) {
@@ -88,7 +114,6 @@ export class Scene {
     grad.addColorStop(1, '#d9c9a6');
     g.fillStyle = grad;
     g.beginPath(); g.arc(cx, cx, r, 0, Math.PI * 2); g.fill();
-    // Soft "seas" and craters
     const rand = rng(9);
     g.save();
     g.beginPath(); g.arc(cx, cx, r, 0, Math.PI * 2); g.clip();
@@ -103,21 +128,23 @@ export class Scene {
     return c;
   }
 
+  // Far shore: rolling hills, crooked bare trees (random each time), house.
   renderTrees(W, H) {
+    const pad = Math.ceil(W * 0.04);         // extra width so the parallax never shows an edge
     const c = document.createElement('canvas');
-    c.width = W; c.height = Math.ceil(this.hy + 2);
+    c.width = W + pad * 2; c.height = Math.ceil(this.hy + 2);
     const g = c.getContext('2d');
+    g.translate(pad, 0);
     const hy = this.hy;
-    const rand = rng(31);
+    const rand = rng(this.seed + 31);
     g.fillStyle = '#03040a';
     g.strokeStyle = '#03040a';
     g.lineCap = 'round';
 
-    // Low rolling far shore
     g.beginPath();
-    g.moveTo(0, hy + 1);
-    for (let x = 0; x <= W; x += W / 60) g.lineTo(x, this.shoreY(x));
-    g.lineTo(W, hy + 1);
+    g.moveTo(-pad, hy + 1);
+    for (let x = -pad; x <= W + pad; x += W / 60) g.lineTo(x, this.shoreY(x));
+    g.lineTo(W + pad, hy + 1);
     g.closePath();
     g.fill();
 
@@ -141,21 +168,41 @@ export class Scene {
         branch(x2, y2, len * (0.62 + rand() * 0.18), na, wid * 0.66, depth - 1);
       }
     };
-
-    // Trees: tall and gnarled at the edges, small and sparse in the middle.
     const tree = (x, h) => {
-      const base = this.shoreY(x) + H * 0.004;
-      branch(x, base + 2, h * 0.38, -Math.PI / 2 + (rand() - 0.5) * 0.2, Math.max(1.2, h * 0.045), 6);
+      branch(x, this.shoreY(x) + H * 0.004, h * 0.38, -Math.PI / 2 + (rand() - 0.5) * 0.25, Math.max(1.2, h * 0.045), 6);
     };
-    for (let i = 0; i < 70; i++) {
+    const count = 60 + Math.floor(rand() * 25);
+    for (let i = 0; i < count; i++) {
       const u = rand();
-      const x = u < 0.5 ? Math.pow(rand(), 1.8) * W * 0.4 : W - Math.pow(rand(), 1.8) * W * 0.4;
-      const edge = Math.abs(x / W - 0.5) * 2;
+      const x = u < 0.5 ? Math.pow(rand(), 1.8) * W * 0.42 - pad * 0.5 : W - Math.pow(rand(), 1.8) * W * 0.42 + pad * 0.5;
+      const edge = Math.min(1, Math.abs(x / W - 0.5) * 2);
       tree(x, H * (0.03 + 0.11 * Math.pow(edge, 2.2) * (0.6 + rand() * 0.6)));
     }
-    for (let i = 0; i < 18; i++) tree(W * (0.3 + rand() * 0.4), H * (0.012 + rand() * 0.025));
-    // One great dead tree on the left
-    branch(W * 0.06, hy + 2, H * 0.11, -Math.PI / 2 + 0.12, H * 0.012, 7);
+    const small = 12 + Math.floor(rand() * 14);
+    for (let i = 0; i < small; i++) tree(W * (0.28 + rand() * 0.44), H * (0.012 + rand() * 0.03));
+    branch(W * (0.04 + rand() * 0.06), hy + 2, H * (0.09 + rand() * 0.04), -Math.PI / 2 + 0.12, H * 0.012, 7);
+    return { canvas: c, pad };
+  }
+
+  // Water texture: thousands of short ripple highlights and troughs, small
+  // and dense far away, longer and wider close up (perspective).
+  renderRipples(W, H) {
+    const lakeH = Math.ceil(H - this.hy);
+    const c = document.createElement('canvas');
+    c.width = Math.ceil(W * 1.12); c.height = lakeH;
+    const g = c.getContext('2d');
+    const rand = rng(404);
+    for (let i = 0; i < 3200; i++) {
+      const d = Math.pow(rand(), 1.9);                  // 0 far … 1 near
+      const y = d * lakeH;
+      const len = W * (0.004 + 0.05 * Math.pow(d, 1.3)) * (0.5 + rand());
+      const th = 0.5 + 2.6 * d;
+      const x = rand() * c.width;
+      g.fillStyle = `rgba(0,0,8,${0.12 + 0.14 * rand()})`;
+      g.beginPath(); g.ellipse(x, y + th * 1.3, len / 2, th * 0.7, 0, 0, Math.PI * 2); g.fill();
+      g.fillStyle = `rgba(175,182,235,${0.035 + 0.06 * rand()})`;
+      g.beginPath(); g.ellipse(x, y, len / 2, th * 0.5, 0, 0, Math.PI * 2); g.fill();
+    }
     return c;
   }
 
@@ -177,15 +224,15 @@ export class Scene {
         g.moveTo(x, H + 4);
         g.quadraticCurveTo(x + lean * 0.3, H - h * 0.6, x + lean, H - h);
         g.stroke();
-        if (rand() < 0.18) { // cattail head
+        if (rand() < 0.18) {
           g.beginPath();
           g.ellipse(x + lean, H - h, 2.4, 7, Math.atan2(lean, h) * 0.6, 0, Math.PI * 2);
           g.fill();
         }
       }
     };
-    clump(-10, W * 0.09, H * 0.13);
-    clump(W * 0.93, W + 10, H * 0.1);
+    clump(-30, W * 0.09, H * 0.13);
+    clump(W * 0.93, W + 30, H * 0.1);
     return c;
   }
 
@@ -193,92 +240,125 @@ export class Scene {
     const c = document.createElement('canvas');
     c.width = W; c.height = H;
     const g = c.getContext('2d');
-    const grad = g.createRadialGradient(W / 2, H * 0.55, Math.min(W, H) * 0.35, W / 2, H * 0.55, Math.max(W, H) * 0.78);
+    const grad = g.createRadialGradient(W / 2, H * 0.55, Math.min(W, H) * 0.38, W / 2, H * 0.55, Math.max(W, H) * 0.8);
     grad.addColorStop(0, 'rgba(0,0,0,0)');
-    grad.addColorStop(1, 'rgba(0,0,0,0.6)');
+    grad.addColorStop(1, 'rgba(0,0,0,0.5)');
     g.fillStyle = grad;
     g.fillRect(0, 0, W, H);
     return c;
   }
 
-  // Sky, moon, shoreline and water. L = light level 0..1, glow = moon boost.
+  update(t, dt, L) {
+    // Slow, gentle camera drift (two out-of-step waves so it never feels mechanical).
+    this.cam.x = Math.sin(t * 0.045) * this.W * 0.007 + Math.sin(t * 0.019 + 1) * this.W * 0.004;
+    this.cam.y = Math.sin(t * 0.033 + 2) * this.H * 0.003;
+    this.hw.update(t, dt, L);
+  }
+
+  // Run fn with the camera shifted by `k` (0 = infinitely far, 1 = foreground).
+  layer(ctx, k, fn) {
+    ctx.save();
+    ctx.translate(this.cam.x * k, this.cam.y * k);
+    fn();
+    ctx.restore();
+  }
+
+  // Sky, moon, far shore and water. L = light level 0..1, glow = moon boost.
   drawBack(ctx, t, dt, L, glow) {
     const { W, H, hy } = this;
+    const m = this.moon;
+    const top = mixc(...SKY_TOP, L), mid = mixc(...SKY_MID, L), low = mixc(...SKY_LOW, L);
 
     const sky = ctx.createLinearGradient(0, 0, 0, hy);
-    sky.addColorStop(0, mix([3, 4, 12], [8, 10, 28], L));
-    sky.addColorStop(0.6, mix([10, 12, 32], [26, 22, 52], L));
-    sky.addColorStop(1, mix([26, 22, 50], [70, 46, 64], L));
+    sky.addColorStop(0, css(top));
+    sky.addColorStop(0.6, css(mid));
+    sky.addColorStop(1, css(low));
     ctx.fillStyle = sky;
     ctx.fillRect(0, 0, W, hy + 1);
 
-    // Stars fade a little as the lake brightens.
-    ctx.fillStyle = '#fff';
-    for (const s of this.stars) {
-      ctx.globalAlpha = s.a * (0.65 + 0.35 * Math.sin(t * s.tw + s.ph)) * (1 - L * 0.4);
-      ctx.fillRect(s.x, s.y, s.r, s.r);
-    }
-    ctx.globalAlpha = 1;
+    this.layer(ctx, 0.1, () => {
+      // Moonlit sky: a wide soft brightening around the moon
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.globalAlpha = Math.min(1, (0.22 + 0.08 * glow) / 0.3);
+      ctx.drawImage(this.skyGlow, -W * 0.05, -H * 0.05);
+      ctx.restore();
 
-    // Moon + halo
-    const m = this.moon;
-    ctx.save();
-    ctx.globalCompositeOperation = 'lighter';
-    const halo = m.r * (9 + glow * 4);
-    ctx.globalAlpha = 0.4 + 0.35 * glow;
-    ctx.drawImage(this.moonGlow, m.x - halo / 2, m.y - halo / 2, halo, halo);
-    ctx.restore();
-    ctx.globalAlpha = 0.92 + 0.08 * glow;
-    ctx.drawImage(this.moonDisk, m.x - this.moonDisk.width / 2, m.y - this.moonDisk.height / 2);
-    ctx.globalAlpha = 1;
+      ctx.fillStyle = '#fff';
+      for (const s of this.stars) {
+        ctx.globalAlpha = s.a * (0.65 + 0.35 * Math.sin(t * s.tw + s.ph)) * (1 - L * 0.35);
+        ctx.fillRect(s.x, s.y, s.r, s.r);
+      }
+      ctx.globalAlpha = 1;
 
-    // Drifting clouds
-    for (const c of this.clouds) {
-      c.x += c.v * dt;
-      if (c.x - c.w / 2 > W) c.x = -c.w / 2;
-      ctx.globalAlpha = c.a * (1 - L * 0.5);
-      ctx.drawImage(this.cloudSprite, c.x - c.w / 2, c.y - c.h / 2, c.w, c.h);
-    }
-    ctx.globalAlpha = 1;
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      const halo = m.r * (9 + glow * 4);
+      ctx.globalAlpha = 0.45 + 0.35 * glow;
+      ctx.drawImage(this.moonGlow, m.x - halo / 2, m.y - halo / 2, halo, halo);
+      ctx.restore();
+      ctx.globalAlpha = 0.94 + 0.06 * glow;
+      ctx.drawImage(this.moonDisk, m.x - this.moonDisk.width / 2, m.y - this.moonDisk.height / 2);
+      ctx.globalAlpha = 1;
 
-    this.hw.drawSky(ctx, t, dt);
+      for (const c of this.clouds) {
+        c.x += c.v * dt;
+        if (c.x - c.w / 2 > W * 1.05) c.x = -c.w / 2 - W * 0.05;
+        ctx.globalAlpha = c.a * (1 - L * 0.5);
+        ctx.drawImage(this.cloudSprite, c.x - c.w / 2, c.y - c.h / 2, c.w, c.h);
+      }
+      ctx.globalAlpha = 1;
+    });
 
-    // Water
+    this.layer(ctx, 0.2, () => this.hw.drawSky(ctx, t, dt));
+
+    // Water: like real water it mirrors the sky — brightest near the horizon
+    // (seen at a grazing angle), darker close up where you look into it.
     const water = ctx.createLinearGradient(0, hy, 0, H);
-    water.addColorStop(0, mix([16, 16, 36], [46, 32, 48], L));
-    water.addColorStop(0.25, mix([7, 8, 20], [22, 16, 26], L));
-    water.addColorStop(1, mix([2, 2, 7], [9, 6, 10], L));
+    water.addColorStop(0, css(mixc(low, [0, 0, 0], 0.25)));
+    water.addColorStop(0.12, css(mixc(mid, [0, 0, 0], 0.35)));
+    water.addColorStop(0.45, css(mixc(mid, [0, 0, 0], 0.72)));
+    water.addColorStop(1, css(mixc(top, [0, 0, 0], 0.75)));
     ctx.fillStyle = water;
     ctx.fillRect(0, hy, W, H - hy);
 
-    // Tree reflection (wavy strips)
     const tc = this.trees;
-    const reflH = H * 0.22;
-    ctx.globalAlpha = 0.5;
-    for (let yy = 0; yy < reflH; yy += 3) {
-      const off = Math.sin(yy * 0.09 + t * 1.3) * (0.6 + yy * 0.025);
-      const sy = hy - yy - 3;
-      if (sy < 0) break;
-      ctx.drawImage(tc, 0, sy, W, 3, off, hy + yy, W, 3);
-    }
-    ctx.globalAlpha = 1;
-    ctx.drawImage(tc, 0, 0);
-    this.hw.drawFarLights(ctx, t);
+    this.layer(ctx, 0.3, () => {
+      // Shoreline reflected in the water (wavy strips)
+      const reflH = H * 0.24;
+      for (let yy = 0; yy < reflH; yy += 3) {
+        const off = Math.sin(yy * 0.09 + t * 1.3) * (0.6 + yy * 0.03);
+        const sy = hy - yy - 3;
+        if (sy < 0) break;
+        ctx.globalAlpha = 0.6 * (1 - (yy / reflH) * 0.6);
+        ctx.drawImage(tc.canvas, 0, sy, tc.canvas.width, 3, -tc.pad + off, hy + yy, tc.canvas.width, 3);
+      }
+      ctx.globalAlpha = 1;
+      ctx.drawImage(tc.canvas, -tc.pad, 0);
+      // Thin bright line where the water meets the far shore
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.fillStyle = css(low, 0.25);
+      ctx.fillRect(-W * 0.05, hy, W * 1.1, 1.5);
+      ctx.restore();
+      this.hw.drawFarLights(ctx, t);
+    });
 
-    // Moon path on the water
-    ctx.save();
-    ctx.globalCompositeOperation = 'lighter';
-    const rows = 70;
-    for (let i = 0; i < rows; i++) {
-      const f = i / rows;
-      const y = hy + 2 + Math.pow(f, 1.5) * (H - hy) * 0.95;
-      const w = m.r * (0.5 + f * 2.6) * (0.55 + 0.45 * Math.sin(t * 1.3 + i * 2.3));
-      const off = Math.sin(t * 0.7 + i * 0.9) * m.r * 0.35 * f;
-      const hgt = 2 + f * 7;
-      ctx.globalAlpha = (0.2 + 0.14 * glow) * (1 - f * 0.8);
-      ctx.drawImage(this.moonGlow, m.x - w / 2 + off, y - hgt / 2, w, hgt);
-    }
-    ctx.restore();
+    this.layer(ctx, 0.15, () => this.drawMoonPath(ctx, t, glow));
+
+    // Moving ripples: two copies of the texture drifting against each other.
+    this.layer(ctx, 0.45, () => {
+      const rc = this.ripples;
+      ctx.globalAlpha = 0.85;
+      ctx.drawImage(rc, -W * 0.06 + Math.sin(t * 0.21) * W * 0.03, hy);
+      ctx.save();
+      ctx.translate(W, 0);
+      ctx.scale(-1, 1);
+      ctx.globalAlpha = 0.55;
+      ctx.drawImage(rc, -W * 0.06 + Math.sin(t * 0.17 + 2) * W * 0.03, hy + 1.5);
+      ctx.restore();
+      ctx.globalAlpha = 1;
+    });
 
     // Warm light from the lamps spreading over the lake
     if (L > 0.001) {
@@ -298,41 +378,91 @@ export class Scene {
     }
   }
 
-  drawMist(ctx, dt, amount, far) {
-    if (amount <= 0.002) return;
-    const W = this.W;
-    for (const m of this.mist) {
-      if (m.far !== far) continue;
-      m.x += m.v * dt * (1 + this.hw.gust * 4 * this.hw.gustDir);
-      if (m.x - m.w / 2 > W) m.x = -m.w / 2;
-      if (m.x + m.w / 2 < 0) m.x = W + m.w / 2;
-      ctx.globalAlpha = m.a * amount;
-      ctx.drawImage(this.mistSprite, m.x - m.w / 2, m.y - m.h / 2, m.w, m.h);
-    }
-    ctx.globalAlpha = 1;
-  }
-
-  drawFireflies(ctx, t, amount = 1) {
+  // Moonlight on the water: a soft column, a wobbling reflection of the moon
+  // (as far below the horizon as the moon is above it), and twinkling glints
+  // that spread wider as the path comes towards you.
+  drawMoonPath(ctx, t, glow) {
+    const { H, hy } = this;
+    const m = this.moon;
+    const lakeH = H - hy;
+    const mirrorY = hy + (hy - m.y);
+    const env = y => 0.3 + 0.7 * Math.exp(-(((y - mirrorY) / (H * 0.14)) ** 2));
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
-    for (const f of this.flies) {
-      const x = f.x + Math.sin(t * f.fx * 6.28 + f.ph) * f.ax;
-      const y = f.y + Math.sin(t * f.fy * 6.28 + f.ph * 2) * f.ay;
-      const blink = Math.pow(Math.max(0, Math.sin(t * f.bf * 3 + f.ph)), 6);
-      if (blink < 0.02) continue;
-      ctx.globalAlpha = blink * 0.9 * amount;
-      ctx.drawImage(this.flyGlow, x - 12, y - 12, 24, 24);
+    // Soft column
+    for (let i = 0; i < 26; i++) {
+      const f = i / 26;
+      const y = hy + Math.pow(f, 1.4) * lakeH;
+      const d = (y - hy) / lakeH;
+      const w = m.r * (0.9 + 5 * d);
+      ctx.globalAlpha = (0.08 + 0.05 * glow) * env(y);
+      ctx.drawImage(this.moonGlow, m.x - w, y - lakeH / 26, w * 2, lakeH / 13);
+    }
+    // Broken reflection of the moon itself
+    for (let i = -6; i <= 6; i++) {
+      const y = mirrorY + i * m.r * 0.2;
+      const k = 1 - Math.abs(i) / 7;
+      const w = m.r * 1.9 * k * (0.7 + 0.3 * Math.sin(t * 2.1 + i * 1.7));
+      const off = Math.sin(t * 1.3 + i * 1.1) * m.r * 0.28;
+      ctx.globalAlpha = (0.5 + 0.15 * glow) * k;
+      ctx.drawImage(this.glint, m.x - w / 2 + off, y - m.r * 0.07, w, m.r * 0.14);
+    }
+    // Glints
+    for (const g of this.glints) {
+      const y = hy + Math.pow(g.v, 1.5) * lakeH;
+      const d = (y - hy) / lakeH;
+      const pathW = m.r * (0.5 + 5 * d);
+      const x = m.x + g.u * pathW + Math.sin(t * 0.6 + g.v * 20) * m.r * 0.2 * d;
+      const tw = Math.max(0, Math.sin(t * g.sp + g.ph));
+      const a = env(y) * Math.pow(1 - Math.abs(g.u), 1.4) * tw * tw * tw;
+      if (a < 0.02) continue;
+      const len = m.r * (0.15 + 1.3 * d) * g.size;
+      const th = 1 + 2.6 * d;
+      ctx.globalAlpha = Math.min(1, a * (1.0 + 0.3 * glow));
+      ctx.drawImage(this.glint, x - len / 2, y - th / 2, len, th);
     }
     ctx.restore();
   }
 
-  update(t, dt, L) { this.hw.update(t, dt, L); }
+  drawMist(ctx, dt, amount, far) {
+    if (amount <= 0.002) return;
+    const W = this.W;
+    this.layer(ctx, far ? 0.35 : 0.9, () => {
+      for (const m of this.mist) {
+        if (m.far !== far) continue;
+        m.x += m.v * dt * (1 + this.hw.gust * 4 * this.hw.gustDir);
+        if (m.x - m.w / 2 > W) m.x = -m.w / 2;
+        if (m.x + m.w / 2 < 0) m.x = W + m.w / 2;
+        ctx.globalAlpha = m.a * amount;
+        ctx.drawImage(this.mistSprite, m.x - m.w / 2, m.y - m.h / 2, m.w, m.h);
+      }
+      ctx.globalAlpha = 1;
+    });
+  }
 
-  drawWater(ctx, t, dt, L) { this.hw.drawWater(ctx, t, dt, L); }
+  drawFireflies(ctx, t, amount = 1) {
+    this.layer(ctx, 0.7, () => {
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      for (const f of this.flies) {
+        const x = f.x + Math.sin(t * f.fx * 6.28 + f.ph) * f.ax;
+        const y = f.y + Math.sin(t * f.fy * 6.28 + f.ph * 2) * f.ay;
+        const blink = Math.pow(Math.max(0, Math.sin(t * f.bf * 3 + f.ph)), 6);
+        if (blink < 0.02) continue;
+        ctx.globalAlpha = blink * 0.9 * amount;
+        ctx.drawImage(this.flyGlow, x - 12, y - 12, 24, 24);
+      }
+      ctx.restore();
+    });
+  }
+
+  drawWater(ctx, t, dt, L) {
+    this.layer(ctx, 0.5, () => this.hw.drawWater(ctx, t, dt, L));
+  }
 
   drawFront(ctx, t) {
-    const lights = this.hw.drawFront(ctx, t);
-    ctx.drawImage(this.reeds, 0, 0);
+    const lights = this.hw.drawFront(ctx, t, this.cam);
+    this.layer(ctx, 1.1, () => ctx.drawImage(this.reeds, 0, 0));
     ctx.drawImage(this.vignette, 0, 0);
     this.hw.drawFrontLights(ctx, t, lights);
   }

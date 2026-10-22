@@ -279,6 +279,75 @@ export class LakeAudio {
     this.bell(f, { vol: 0.025, decay: 1.6, pan });
   }
 
+  // The skeleton: a low rumble as it rises, a bony click per step, a splash.
+  rumble() {
+    if (!this.ctx || this.muted) return;
+    const ctx = this.ctx, t = ctx.currentTime;
+    const src = ctx.createBufferSource();
+    src.buffer = this.noiseBuffer(3, true);
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass'; lp.frequency.value = 160;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(0.5, t + 0.8);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 3);
+    const p = ctx.createStereoPanner(); p.pan.value = -0.7;
+    src.connect(lp).connect(g).connect(p).connect(this.master);
+    src.start(t);
+  }
+
+  rattle() {
+    if (!this.ctx || this.muted) return;
+    const ctx = this.ctx, t = ctx.currentTime;
+    for (let i = 0; i < 2; i++) {
+      const s = t + i * 0.035;
+      const o = ctx.createOscillator();
+      o.type = 'square';
+      o.frequency.setValueAtTime(900 + Math.random() * 600, s);
+      const bp = ctx.createBiquadFilter();
+      bp.type = 'bandpass'; bp.frequency.value = 1800; bp.Q.value = 6;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, s);
+      g.gain.exponentialRampToValueAtTime(0.06, s + 0.003);
+      g.gain.exponentialRampToValueAtTime(0.0001, s + 0.05);
+      const p = ctx.createStereoPanner(); p.pan.value = -0.6;
+      o.connect(bp).connect(g).connect(p).connect(this.master);
+      o.start(s); o.stop(s + 0.06);
+    }
+  }
+
+  splash() {
+    if (!this.ctx || this.muted) return;
+    const ctx = this.ctx, t = ctx.currentTime;
+    const src = ctx.createBufferSource();
+    src.buffer = this.noiseBuffer(1.6);
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.setValueAtTime(5000, t);
+    lp.frequency.exponentialRampToValueAtTime(400, t + 1.2);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(0.4, t + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 1.5);
+    const p = ctx.createStereoPanner(); p.pan.value = -0.5;
+    src.connect(lp).connect(g).connect(p);
+    p.connect(this.master); p.connect(this.reverb);
+    src.start(t);
+    // droplets falling back
+    for (let i = 0; i < 7; i++) {
+      const s = t + 0.25 + Math.random() * 0.9;
+      const o = ctx.createOscillator();
+      o.frequency.setValueAtTime(900 + Math.random() * 900, s);
+      o.frequency.exponentialRampToValueAtTime(1800 + Math.random() * 900, s + 0.05);
+      const dg = ctx.createGain();
+      dg.gain.setValueAtTime(0.0001, s);
+      dg.gain.exponentialRampToValueAtTime(0.04, s + 0.005);
+      dg.gain.exponentialRampToValueAtTime(0.0001, s + 0.08);
+      o.connect(dg).connect(p);
+      o.start(s); o.stop(s + 0.1);
+    }
+  }
+
   toggleMute() {
     this.muted = !this.muted;
     if (this.master) this.master.gain.setTargetAtTime(this.muted ? 0 : 0.9, this.ctx.currentTime, 0.1);

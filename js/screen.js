@@ -1,6 +1,6 @@
 // Lake of Lights — big screen.
 import { CONFIG } from './config.js';
-import { makeSlots, makeOrder, wordTargets, wordSpacing, matchTargets } from './layout.js';
+import { makeSlots, makeOrder, wordTargets, wordSpacing, matchTargets, HORIZON } from './layout.js';
 import { makeGlow, GLOW_WARM, wobble, drawFlame, drawLampBody, drawWaterContact, drawReflection, wickPos } from './lamp-art.js';
 import { Scene } from './scene.js';
 import { LakeAudio } from './audio.js';
@@ -14,8 +14,13 @@ const MODE = backendMode();
 
 const canvas = document.getElementById('lake');
 const ctx = canvas.getContext('2d');
-const scene = new Scene();
+const scene = new Scene(CONFIG.SCENE_SEED);
 const audio = new LakeAudio();
+scene.hw.onEvent = name => {
+  if (name === 'splash') audio.splash();
+  else if (name === 'rattle') audio.rattle();
+  else if (name === 'rise') audio.rumble();
+};
 const glow = makeGlow(128, GLOW_WARM);
 const ember = makeGlow(64, [[0, 'rgba(255,250,220,1)'], [0.25, 'rgba(255,200,110,0.7)'], [1, 'rgba(255,120,30,0)']]);
 
@@ -44,7 +49,7 @@ let formed = false;
 let qrVisible = true, qrAlpha = 0;
 let connectionOk = true;
 let lastLampCheck = 0;      // when the screen last heard from the database
-let started = false;
+let started = false, startedAt = 0;
 let showHelp = false;
 let now = 0;
 let fpsShown = 0, fpsFrames = 0, fpsT0 = 0;
@@ -55,13 +60,23 @@ const clamp01 = v => Math.max(0, Math.min(1, v));
 const lerp = (a, b, t) => a + (b - a) * t;
 
 // ---------- Layout ----------
-function resize() {
-  DPR = Math.min(window.devicePixelRatio || 1, 1.5);
-  W = window.innerWidth; H = window.innerHeight;
+// Render quality: 1 = full resolution. If the laptop struggles (low frame
+// rate), the screen quietly renders at a slightly lower resolution.
+const QUALITY_STEPS = [1, 0.8, 0.65];
+let quality = Number(params.get('quality')) || 1;
+let lowFpsSeconds = 0;
+
+function setCanvasSize() {
+  DPR = Math.min(window.devicePixelRatio || 1, 1.5) * quality;
   canvas.width = Math.round(W * DPR);
   canvas.height = Math.round(H * DPR);
   canvas.style.width = W + 'px';
   canvas.style.height = H + 'px';
+}
+
+function resize() {
+  W = window.innerWidth; H = window.innerHeight;
+  setCanvasSize();
   BASE = H * 0.047;
   scene.resize(W, H);
   resizeLightMap();
@@ -509,7 +524,7 @@ function drawOperator() {
   }
   if (!showHelp) return;
   const lines = [
-    `Lamps lit: ${litCount} / ${N}   ·   waiting: ${pending.length}   ·   mode: ${MODE}   ·   ${fpsShown} fps`,
+    `Lamps lit: ${litCount} / ${N}   ·   waiting: ${pending.length}   ·   mode: ${MODE}   ·   ${fpsShown} fps   ·   quality ${Math.round(quality * 100)}%`,
     `Guest link: ${guestUrl()}`,
     `Phone shakes: ${shakeStatus}   ·   last lamp check: ${lastLampCheck ? Math.round(now - lastLampCheck) + 's ago' : '—'}${frameErrors ? `   ·   frame errors: ${frameErrors}` : ''}`,
     'F fullscreen · M mute · Q show/hide QR · H hide this panel',
@@ -540,7 +555,19 @@ function frameBody() {
   lastT = t; now = t;
   frameDt = dt;
   fpsFrames++;
-  if (t - fpsT0 >= 1) { fpsShown = Math.round(fpsFrames / (t - fpsT0)); fpsFrames = 0; fpsT0 = t; }
+  if (t - fpsT0 >= 1) {
+    fpsShown = Math.round(fpsFrames / (t - fpsT0)); fpsFrames = 0; fpsT0 = t;
+    // Automatic quality: after 4 slow seconds in a row, step the resolution down.
+    if (started && !params.has('quality') && t - startedAt > 6) {
+      lowFpsSeconds = fpsShown < 40 ? lowFpsSeconds + 1 : 0;
+      const i = QUALITY_STEPS.indexOf(quality);
+      if (lowFpsSeconds >= 4 && i >= 0 && i < QUALITY_STEPS.length - 1) {
+        quality = QUALITY_STEPS[i + 1];
+        lowFpsSeconds = 0;
+        setCanvasSize();
+      }
+    }
+  }
 
   processQueue();
   if (finale && finale.t0 === null && now >= finale.at) startFinale();
@@ -568,7 +595,15 @@ function frameBody() {
   scene.drawWater(ctx, now, dt, Math.min(1, light));
 
   // Positions this frame
-  const placed = lamps.map(L => ({ L, p: lampPos(L) }));
+  // Lamps drift with the camera too: near ones more than far ones (depth).
+  const placed = lamps.map(L => {
+    const p = lampPos(L);
+    const depth = clamp01((p.y - H * HORIZON) / (H * (1 - HORIZON)));
+    const k = 0.35 + 0.6 * depth;
+    p.x += scene.cam.x * k;
+    p.y += scene.cam.y * k;
+    return { L, p };
+  });
   placed.sort((a, b) => a.p.y - b.p.y);
 
   // A slow wave of brightness travels across the finished word.
@@ -654,6 +689,7 @@ function demoLoop() {
 function begin() {
   if (started) return;
   started = true;
+  startedAt = performance.now() / 1000;
   audio.start();
   document.getElementById('start').classList.add('hidden');
   try { document.documentElement.requestFullscreen && document.documentElement.requestFullscreen(); } catch { /* ignore */ }

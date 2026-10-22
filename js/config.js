@@ -20,6 +20,10 @@ export const CONFIG = {
   // Seed for the lamp layout. Changing it rearranges every lamp spot.
   LAYOUT_SEED: 1105,
 
+  // Trees on the big screen: 0 = new random trees every time the screen
+  // opens; any other number always gives the same trees.
+  SCENE_SEED: 0,
+
   // Nicknames that are refused (the database has the same list).
   BLOCKED: [
     'FUCK','FUK','FCK','SHIT','CUNT','DICK','COCK','PISS','TWAT','SLUT',
