@@ -155,6 +155,9 @@ README.md           Setup + event-day checklist
 - [x] Big screen: lake, lamps, arrivals, nicknames, milestones, heartbeat, WELCOME finale, sound, QR, operator keys, demo mode
 - [x] Guest page: nickname, hold to light, swipe up, motion-reactive flame, keepsake with mini map, retries
 - [x] Rehearsal simulator
+- [x] Halloween scene: spooky trees, owl, spider, jack-o'-lanterns, haunted house, witch, bats, ghost, wisps, wind gusts
+- [x] Shake mirroring: a guest's shake makes their own lamp flutter on the big screen
+- [x] Hidden "light another lamp" on the phone (tap the moon 5×, or `?new`)
 - [ ] Owner: run `supabase/schema.sql` in the Supabase SQL Editor
 - [ ] Owner: enable GitHub Pages
 - [ ] Rehearse with real phones on mobile data, on the real laptop and projector

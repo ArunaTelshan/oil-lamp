@@ -150,6 +150,87 @@ export function resetLocal() {
   channel && channel.postMessage({ type: 'reset' });
 }
 
+// ---------- Shakes: a guest shakes their phone → their lamp flutters ----------
+// Phones send a tiny message through Supabase Realtime (no database use);
+// the screen listens on a WebSocket.
+const SHAKE_TOPIC = 'lake-shake';
+let shakeBusy = false;
+export const shakeStats = { sent: 0, failed: 0, last: '' };
+
+export function sendShake(lamp, power) {
+  const mode = backendMode();
+  const payload = { l: lamp, p: Math.round(power * 100) / 100 };
+  if (mode !== 'supabase') {
+    channel && channel.postMessage({ type: 'shake', ...payload });
+    shakeStats.sent++;
+    return;
+  }
+  if (shakeBusy) return;
+  shakeBusy = true;
+  fetch(`${CONFIG.SUPABASE_URL}/realtime/v1/api/broadcast`, {
+    method: 'POST',
+    headers: headers(),
+    body: JSON.stringify({ messages: [{ topic: SHAKE_TOPIC, event: 'shake', payload, private: false }] }),
+    keepalive: true,
+  }).then(r => {
+    shakeStats.last = String(r.status);
+    if (r.ok) shakeStats.sent++; else shakeStats.failed++;
+  }).catch(e => {
+    shakeStats.failed++;
+    shakeStats.last = e.message;
+  }).finally(() => { shakeBusy = false; });
+}
+
+// onShake({l, p}); onStatus(text) for the operator panel.
+export function watchShakes({ onShake, onStatus }) {
+  const mode = backendMode();
+  if (mode === 'local') {
+    channel && channel.addEventListener('message', e => {
+      if (e.data && e.data.type === 'shake') onShake(e.data);
+    });
+    onStatus && onStatus('local');
+    return { stop() {} };
+  }
+  if (mode !== 'supabase') return { stop() {} };
+  const topic = `realtime:${SHAKE_TOPIC}`;
+  const url = `${CONFIG.SUPABASE_URL.replace(/^http/, 'ws')}/realtime/v1/websocket?apikey=${encodeURIComponent(CONFIG.SUPABASE_ANON_KEY)}&vsn=1.0.0`;
+  let ws = null, hb = null, ref = 0, retry = 0, stopped = false;
+  const send = m => { if (ws && ws.readyState === 1) ws.send(JSON.stringify(m)); };
+  const connect = () => {
+    onStatus && onStatus('connecting');
+    try { ws = new WebSocket(url); } catch { schedule(); return; }
+    ws.onopen = () => {
+      const joinRef = String(++ref);
+      send({
+        topic, event: 'phx_join', ref: joinRef, join_ref: joinRef,
+        payload: { config: { broadcast: { ack: false, self: false }, presence: { key: '', enabled: false }, postgres_changes: [], private: false } },
+      });
+      clearInterval(hb);
+      hb = setInterval(() => send({ topic: 'phoenix', event: 'heartbeat', payload: {}, ref: String(++ref) }), 25000);
+    };
+    ws.onmessage = e => {
+      let m;
+      try { m = JSON.parse(e.data); } catch { return; }
+      if (m.topic === topic && m.event === 'phx_reply' && m.payload) {
+        if (m.payload.status === 'ok') { retry = 0; onStatus && onStatus('connected'); }
+        else onStatus && onStatus(`refused: ${JSON.stringify(m.payload.response || {}).slice(0, 80)}`);
+      } else if (m.event === 'broadcast' && m.payload && m.payload.event === 'shake') {
+        onShake(m.payload.payload || {});
+      } else if (m.topic === topic && (m.event === 'phx_error' || m.event === 'phx_close')) {
+        try { ws.close(); } catch { /* ignore */ }
+      }
+    };
+    ws.onclose = () => { clearInterval(hb); if (!stopped) schedule(); };
+    ws.onerror = () => { onStatus && onStatus('connection error'); };
+  };
+  const schedule = () => {
+    onStatus && onStatus('reconnecting');
+    setTimeout(connect, Math.min(15000, 1000 * 2 ** retry++));
+  };
+  connect();
+  return { stop() { stopped = true; clearInterval(hb); ws && ws.close(); } };
+}
+
 function watchLocal({ onLamps, onReset }) {
   let last = 0;
   let initial = true;
@@ -163,7 +244,7 @@ function watchLocal({ onLamps, onReset }) {
   };
   check();
   const iv = setInterval(check, 500);
-  if (channel) channel.onmessage = check;
+  if (channel) channel.addEventListener('message', e => { if (!e.data || e.data.type !== 'shake') check(); });
   window.addEventListener('storage', check);
   return { stop() { clearInterval(iv); } };
 }

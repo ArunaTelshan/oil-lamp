@@ -35,9 +35,10 @@ export function makeSlots(seed, n) {
     guard++;
     const y = LAKE_TOP + Math.pow(rand(), 0.85) * (LAKE_BOTTOM - LAKE_TOP);
     const s = depthScale(y);
-    const margin = 0.03 + 0.02 * s;
+    const margin = 0.09 + 0.01 * s;     // clear of the foreground tree trunks
     const x = margin + rand() * (1 - 2 * margin);
     if (x > 0.80 && y > 0.74) continue; // QR panel area
+    if (x < 0.27 && y > 0.82) continue; // pumpkin bank (bottom-left)
     let ok = true;
     for (const p of pts) {
       const dx = (x - p.x) * aspect;
@@ -53,13 +54,22 @@ export function makeSlots(seed, n) {
 }
 
 // Order in which spots are filled: shuffled, so the lake fills organically.
-export function makeOrder(seed, n) {
+// The very first lamp always lands near the middle of the lake.
+export function makeOrder(seed, n, slots = makeSlots(seed, n)) {
   const rand = rng(seed * 7 + 3);
   const a = Array.from({ length: n }, (_, i) => i);
   for (let i = n - 1; i > 0; i--) {
     const j = Math.floor(rand() * (i + 1));
     [a[i], a[j]] = [a[j], a[i]];
   }
+  let best = 0, bd = Infinity;
+  a.forEach((si, k) => {
+    const s = slots[si];
+    if (!s) return;
+    const d = Math.hypot(s.x - 0.5, (s.y - 0.72) * 1.5);
+    if (d < bd) { bd = d; best = k; }
+  });
+  a.unshift(a.splice(best, 1)[0]);
   return a;
 }
 
@@ -178,7 +188,7 @@ export function wordTargets(word, n, W, H) {
   unitPts.push(...kept);
 
   // Fit the word on the lake.
-  const unit = Math.min((W * 0.88) / wordW, H * 0.2);
+  const unit = Math.min((W * 0.8) / wordW, H * 0.2);
   const ox = (W - wordW * unit) / 2;
   const oy = H * 0.705 - unit / 2;
   return unitPts.map(([x, y]) => ({ x: ox + x * unit, y: oy + y * unit }));

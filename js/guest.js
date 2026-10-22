@@ -2,7 +2,7 @@
 import { CONFIG } from './config.js';
 import { makeSlots, makeOrder, HORIZON } from './layout.js';
 import { makeGlow, GLOW_WARM, wobble, drawFlame, drawLampBody, wickPos } from './lamp-art.js';
-import { backendMode, cleanNickname, isBlocked, lightLampWithRetry } from './backend.js';
+import { backendMode, cleanNickname, isBlocked, lightLampWithRetry, sendShake, shakeStats } from './backend.js';
 
 const N = CONFIG.TOTAL_LAMPS;
 const app = document.getElementById('app');
@@ -104,6 +104,7 @@ let gSign = /iPhone|iPad|iPod/.test(navigator.userAgent) ? -1 : 1;
 const grav = { x: 0, y: 0, z: 0, init: false };
 const hp = { x: 0, y: 0, z: 0 };
 let shakeKick = 0;          // quick sideways push from a shake
+let shakeEnergy = 0, lastShakeSend = 0;   // mirrored to the lamp on the big screen
 const DEBUG = new URLSearchParams(location.search).has('debug');
 const needsPermission = () => {
   const DO = window.DeviceOrientationEvent, DM = window.DeviceMotionEvent;
@@ -129,9 +130,10 @@ function onMotion(e) {
   } else return;
   hp.x = x; hp.y = y; hp.z = z;
   motionEvents++;
-  if (!motionLive) { motionLive = true; updateShakeHint(); }
+  motionLive = true;
   const mag = Math.hypot(x, y, z);
   if (mag < 0.3) return;    // sensor noise
+  if (mag > 1.2) shakeEnergy = Math.max(shakeEnergy, mag);
   // Even a gentle shake should clearly move the flame.
   leanV += -x * 0.1;
   shakeKick = Math.max(-0.7, Math.min(0.7, shakeKick - x * 0.035));
@@ -147,8 +149,6 @@ function attachMotion() {
   if (motionOn) return;
   motionOn = true;
   window.addEventListener('devicemotion', onMotion);
-  // If nothing arrives (e.g. a laptop), suggest using a finger instead.
-  setTimeout(updateShakeHint, 2000);
 }
 
 // Always listen straight away: most phones send motion with no prompt.
@@ -168,18 +168,8 @@ function enableMotion() {
     motionAsking = false;
     if (r.includes('granted')) motionGranted = true;
     else if (!motionLive) motionDenied = true;
-    updateShakeHint();
-    setTimeout(updateShakeHint, 1500);
   });
 }
-
-const shakeHint = document.getElementById('shakeHint');
-function updateShakeHint() {
-  if (motionLive) shakeHint.textContent = 'Gently shake your phone ✦';
-  else if (needsPermission() && !motionGranted && !motionDenied) shakeHint.textContent = 'Tap here, then gently shake your phone ✦';
-  else shakeHint.textContent = 'Touch and drag near your flame ✦';
-}
-shakeHint.addEventListener('click', () => enableMotion());
 
 // ---------- Little sounds on the phone ----------
 function initAudio() {
@@ -236,6 +226,7 @@ stage.addEventListener('pointermove', e => {
   }
   if (push && (step === 'done' || step === 'full')) {
     leanV += (e.clientX - push.x) * 0.03;
+    shakeEnergy = Math.max(shakeEnergy, Math.abs(e.clientX - push.x) * 0.25);
     push.x = e.clientX;
   }
 });
@@ -296,7 +287,7 @@ function showKeepsake(k) {
 
 // ---------- Mini map of the lake ----------
 const SLOTS = makeSlots(CONFIG.LAYOUT_SEED, N);
-const ORDER = makeOrder(CONFIG.LAYOUT_SEED, N);
+const ORDER = makeOrder(CONFIG.LAYOUT_SEED, N, SLOTS);
 let myLamp = 0;
 function drawMap(pulse = 0) {
   const m = document.getElementById('map');
@@ -374,6 +365,13 @@ function frame() {
   lean += leanV * dt;
   lean = Math.max(-1.1, Math.min(1.1, lean));
   flutter = Math.max(0, flutter - dt * 1.4);
+  // Tell the big screen (at most twice a second) so this guest's lamp flutters too.
+  if (step === 'done' && myLamp && shakeEnergy > 2.5 && now - lastShakeSend > 0.5) {
+    sendShake(myLamp, Math.min(1.5, shakeEnergy / 10));
+    lastShakeSend = now;
+    shakeEnergy = 0;
+  }
+  shakeEnergy *= Math.exp(-dt * 4);
   shakeKick *= Math.exp(-dt * 5);
 
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
@@ -476,17 +474,41 @@ function frame() {
       `permission step: ${needsPermission() ? 'yes' : 'no'}  granted: ${motionGranted}  denied: ${motionDenied}\n` +
       `events: ${motionEvents}  shake: ${f(hp.x)} ${f(hp.y)} ${f(hp.z)}\n` +
       `gravity: ${f(grav.x)} ${f(grav.y)} ${f(grav.z)}  sign: ${gSign}\n` +
-      `lean: ${f(lean)}  flutter: ${f(flutter)}`;
+      `lean: ${f(lean)}  flutter: ${f(flutter)}\n` +
+      `to screen: sent ${shakeStats.sent}  failed ${shakeStats.failed}  last ${shakeStats.last}`;
   }
 
   requestAnimationFrame(frame);
 }
 
+// ---------- Hidden: light another lamp with a new name ----------
+// Tap the moon 5 times quickly (or open the page with ?new). The phone
+// forgets its lamp and gets a fresh identity, so it can light a new one.
+function startOver() {
+  try { localStorage.removeItem(KEEP); localStorage.removeItem('lol_device'); } catch { /* ignore */ }
+  myLamp = 0; nickname = ''; flameK = 0; flare = 0; hold = 0; fly = null; lift = 0;
+  nickInput.value = '';
+  nickError.textContent = '';
+  renderCells();
+  setStep('name');
+  chime([1318.5, 987.77, 659.25], 0.04);
+}
+let moonTaps = [];
+window.addEventListener('pointerdown', e => {
+  const m = document.querySelector('.moon').getBoundingClientRect();
+  const pad = 24;
+  if (e.clientX < m.left - pad || e.clientX > m.right + pad || e.clientY < m.top - pad || e.clientY > m.bottom + pad) return;
+  moonTaps = moonTaps.filter(t => now - t < 3).concat(now);
+  if (moonTaps.length >= 5 && step !== 'sending') { moonTaps = []; initAudio(); startOver(); }
+});
+
 // ---------- Start ----------
 function init() {
+  if (new URLSearchParams(location.search).has('new')) {
+    try { localStorage.removeItem(KEEP); localStorage.removeItem('lol_device'); } catch { /* ignore */ }
+  }
   resize();
   attachMotion();
-  if (needsPermission()) updateShakeHint();
   let keep = null;
   try { keep = JSON.parse(localStorage.getItem(KEEP) || 'null'); } catch { /* ignore */ }
   if (keep && keep.lamp) {

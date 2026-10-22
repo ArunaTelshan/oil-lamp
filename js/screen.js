@@ -4,7 +4,7 @@ import { makeSlots, makeOrder, wordTargets, wordSpacing, matchTargets } from './
 import { makeGlow, GLOW_WARM, wobble, drawFlame, drawLampBody, drawWaterContact, drawReflection, wickPos } from './lamp-art.js';
 import { Scene } from './scene.js';
 import { LakeAudio } from './audio.js';
-import { backendMode, watchLamps } from './backend.js';
+import { backendMode, watchLamps, watchShakes } from './backend.js';
 
 const N = CONFIG.TOTAL_LAMPS;
 const WORD = CONFIG.FINALE_WORD || 'WELCOME';
@@ -20,7 +20,7 @@ const glow = makeGlow(128, GLOW_WARM);
 const ember = makeGlow(64, [[0, 'rgba(255,250,220,1)'], [0.25, 'rgba(255,200,110,0.7)'], [1, 'rgba(255,120,30,0)']]);
 
 const SLOTS = makeSlots(CONFIG.LAYOUT_SEED, N);
-const ORDER = makeOrder(CONFIG.LAYOUT_SEED, N);
+const ORDER = makeOrder(CONFIG.LAYOUT_SEED, N, SLOTS);
 
 let W = 0, H = 0, DPR = 1, BASE = 30;
 let targets = [], finaleLampSize = 20;
@@ -30,6 +30,9 @@ const pending = [];        // lamps waiting for their arrival moment
 const ripples = [];
 const sparks = [];
 const known = new Set();
+const byId = new Map();     // lamp id → lamp (for shakes)
+let shakeStatus = 'off';
+let frameDt = 0.016;
 let lastSpawn = 0;
 let litCount = 0;          // lamps whose flame has caught
 let light = 0;             // smoothed light level 0..1
@@ -99,6 +102,9 @@ function makeLamp(r) {
     lit: 0,
     flare: 0,
     landed: false,
+    shake: 0,          // how hard the guest is shaking their phone (decays)
+    nickAt: null,      // when the nickname was last shown
+    lastSpark: 0,
   };
 }
 
@@ -106,6 +112,7 @@ function placeLit(r) {
   const L = makeLamp(r);
   L.state = 'lit'; L.lit = 1; L.t0 = now - 100;
   lamps.push(L);
+  byId.set(L.id, L);
   litCount++;
 }
 
@@ -120,6 +127,7 @@ function spawn(r) {
   L.cx = (L.sx + w.x) / 2 + (Math.random() - 0.5) * W * 0.15;
   L.cy = Math.min(L.sy, w.y) - H * (final ? 0.35 : 0.18);
   lamps.push(L);
+  byId.set(L.id, L);
   audio.rise((w.x / W) * 2 - 1);
 }
 
@@ -136,6 +144,7 @@ function processQueue() {
 
 function ignite(L, p) {
   litCount++;
+  L.nickAt = now;
   const w = wickPos(p.x, p.y, p.s);
   ripples.push({ x: p.x, y: p.y, s: p.s, t0: now, dur: 2.2 });
   ripples.push({ x: p.x, y: p.y, s: p.s, t0: now + 0.35, dur: 2.4 });
@@ -147,11 +156,22 @@ function ignite(L, p) {
     audio.milestone();
     moonPulse = 1;
     ripples.push({ lake: true, t0: now, dur: 5 });
+    if (L.id === MILESTONES[1]) scene.hw.launchWitch(); // halfway: a witch crosses the moon
   }
   if (litCount >= N && !finale) {
     finale = { at: now + 3.4, t0: null };
     audio.hush(3.4);
   }
+}
+
+// ---------- Shakes from guests' phones ----------
+function onShake(msg) {
+  const L = byId.get(Number(msg.l));
+  if (!L || L.state === 'arriving') return;
+  const p = Math.max(0, Math.min(1.5, Number(msg.p) || 0));
+  L.shake = Math.min(2, L.shake + p * 0.9 + 0.25);
+  // Show the nickname again (if it isn't already showing) so the guest can spot their lamp.
+  if (!L.nickAt || now - L.nickAt > 4.6) L.nickAt = now;
 }
 
 // ---------- Finale ----------
@@ -177,7 +197,7 @@ function startFinale() {
     L.sway = (Math.random() - 0.5) * W * 0.06;
     L.landed = false;
   }
-  scene.batsEnabled = false;
+  scene.hw.enabled = false;
   audio.finale(9.4);
 }
 
@@ -191,7 +211,7 @@ function formNow() {
   }
   assignTargets();
   formed = true;
-  scene.batsEnabled = false;
+  scene.hw.enabled = false;
 }
 
 function replayFinale() {
@@ -305,9 +325,12 @@ function lampLook(L, p, intensity) {
     flameK = clamp01(k / 0.6);
   }
   const w = wickPos(p.x, p.y, p.s);
-  const flick = 1 + 0.07 * wobble(now, L.seed) + 0.03 * Math.sin(now * 31 + L.seed);
-  const fh = p.s * 0.95 * flameK * flick * (1 + L.flare * 0.6) * intensity;
-  const lean = 0.08 * wobble(now * 0.6, L.seed + 9);
+  const sh = Math.min(1.5, L.shake);
+  const flick = 1 + 0.07 * wobble(now, L.seed) + 0.03 * Math.sin(now * 31 + L.seed) + sh * 0.12 * Math.sin(now * 17 + L.seed);
+  const fh = p.s * 0.95 * flameK * flick * (1 + L.flare * 0.6 + sh * 0.15) * intensity;
+  const gust = scene.hw.gust * scene.hw.gustDir * (0.32 + 0.08 * Math.sin(L.seed));
+  const lean = 0.08 * wobble(now * 0.6, L.seed + 9) + gust +
+    sh * (0.32 * Math.sin(now * 19 + L.seed) + 0.18 * Math.sin(now * 31 + L.seed * 2));
   return { bodyA, flameK, w, flick, fh, lean };
 }
 
@@ -320,6 +343,16 @@ function drawLampBodyPass(L, p, intensity) {
   } else if (L.flare > 0) {
     L.flare = Math.max(0, L.flare - 0.016);
   }
+  if (L.shake > 0.01) {
+    L.shake *= Math.exp(-frameDt * 1.5);
+    if (L.shake > 0.5 && now - L.lastSpark > 0.18) {
+      L.lastSpark = now;
+      const w = wickPos(p.x, p.y, p.s);
+      for (let i = 0; i < 2 + Math.round(L.shake * 2); i++) {
+        sparks.push({ x: w.x, y: w.y - p.s * 0.4, vx: (Math.random() - 0.5) * p.s * 2.4, vy: -p.s * (0.8 + Math.random() * 1.4), t0: now, life: 0.6 + Math.random() * 0.6, size: p.s * 0.16 });
+      }
+    }
+  } else L.shake = 0;
   const o = lampLook(L, p, intensity);
   if (o.bodyA <= 0) return;
   if (o.flameK >= 1 && o.bodyA >= 1) {
@@ -330,7 +363,7 @@ function drawLampBodyPass(L, p, intensity) {
     drawLampBody(ctx, p.x, p.y, p.s, 0.25 + 0.75 * o.flameK, o.bodyA);
   }
   if (o.flameK > 0) {
-    const g1 = p.s * (4.2 + L.flare * 5) * (0.8 + 0.2 * o.flick) * LM;
+    const g1 = p.s * (4.2 + L.flare * 5 + Math.min(1.5, L.shake) * 1.5) * (0.8 + 0.2 * o.flick) * LM;
     lctx.globalAlpha = Math.min(1, 0.45 * o.flameK * Math.min(1.4, intensity));
     lctx.drawImage(glow, o.w.x * LM - g1 / 2, (o.w.y - o.fh * 0.4) * LM - g1 / 2, g1, g1);
     const g2 = p.s * 11 * LM;
@@ -354,8 +387,8 @@ function drawLampFlamePass(L, p, intensity) {
 }
 
 function drawNickname(L, p) {
-  if (!L.nick || L.state === 'arriving' && now - L.t0 < L.sparkDur) return;
-  const age = now - L.t0 - (L.sparkDur || 0);
+  if (!L.nick || L.nickAt === null) return;
+  const age = now - L.nickAt;
   const DUR = 4.6;
   if (age < 0 || age > DUR) return;
   const a = Math.min(1, age / 0.4) * (age > DUR - 1.3 ? (DUR - age) / 1.3 : 1);
@@ -477,6 +510,7 @@ function drawOperator() {
   const lines = [
     `Lamps lit: ${litCount} / ${N}   ·   waiting: ${pending.length}   ·   mode: ${MODE}   ·   ${fpsShown} fps`,
     `Guest link: ${guestUrl()}`,
+    `Phone shakes: ${shakeStatus}`,
     'F fullscreen · M mute · Q show/hide QR · H hide this panel',
     MODE === 'demo' ? 'Space add a lamp · D pause/resume demo' : '',
     'Shift+R replay finale (after all lamps are lit)',
@@ -497,6 +531,7 @@ function frame() {
   const t = performance.now() / 1000;
   const dt = Math.min(0.05, t - lastT);
   lastT = t; now = t;
+  frameDt = dt;
   fpsFrames++;
   if (t - fpsT0 >= 1) { fpsShown = Math.round(fpsFrames / (t - fpsT0)); fpsFrames = 0; fpsT0 = t; }
 
@@ -520,8 +555,10 @@ function frame() {
   const moonGlow = Math.min(1.4, light * 0.5 + moonPulse * 0.5 + (formed ? 0.4 : 0));
 
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  scene.update(now, dt, Math.min(1, light));
   scene.drawBack(ctx, now, dt, Math.min(1, light), moonGlow);
   scene.drawMist(ctx, dt, mistAmount, true);
+  scene.drawWater(ctx, now, dt, Math.min(1, light));
 
   // Positions this frame
   const placed = lamps.map(L => ({ L, p: lampPos(L) }));
@@ -577,7 +614,7 @@ function frame() {
 
   scene.drawMist(ctx, dt, mistAmount, false);
   scene.drawFireflies(ctx, now, 1 - (formed ? 0.5 : 0));
-  scene.drawFront(ctx);
+  scene.drawFront(ctx, now);
   drawQR(dt);
   drawOperator();
 
@@ -591,6 +628,14 @@ function demoAdd() {
   if (demoId >= N) return;
   demoId++;
   addLamps([{ id: demoId, nickname: DEMO_NAMES[Math.floor(Math.random() * DEMO_NAMES.length)] }], false);
+}
+function demoShakes() {
+  const lit = lamps.filter(L => L.state === 'lit');
+  if (lit.length) {
+    const L = lit[Math.floor(Math.random() * lit.length)];
+    for (let i = 0; i < 4; i++) setTimeout(() => onShake({ l: L.id, p: 0.6 + Math.random() * 0.8 }), i * 450);
+  }
+  setTimeout(demoShakes, 3000 + Math.random() * 4000);
 }
 function demoLoop() {
   clearTimeout(demoTimer);
@@ -607,7 +652,7 @@ function begin() {
   audio.start();
   document.getElementById('start').classList.add('hidden');
   try { document.documentElement.requestFullscreen && document.documentElement.requestFullscreen(); } catch { /* ignore */ }
-  if (MODE === 'demo') { demoOn = true; demoLoop(); }
+  if (MODE === 'demo') { demoOn = true; demoLoop(); demoShakes(); }
 }
 
 document.getElementById('start').addEventListener('click', begin);
@@ -649,9 +694,10 @@ document.getElementById('mode').textContent = modeNote;
       onStatus: ok => { connectionOk = ok; },
       onReset: () => location.reload(),
     });
+    watchShakes({ onShake, onStatus: st => { shakeStatus = st; } });
   }
   requestAnimationFrame(frame);
 });
 
 // Test hook for automated checks.
-window.__lake = { get litCount() { return litCount; }, get formed() { return formed; }, get lamps() { return lamps.length; }, addLamps, demoAdd, begin };
+window.__lake = { get litCount() { return litCount; }, get formed() { return formed; }, get lamps() { return lamps.length; }, addLamps, demoAdd, begin, onShake, scene, get maxShake() { return Math.max(0, ...lamps.map(l => l.shake)); }, get nickShown() { return lamps.filter(l => l.nickAt && now - l.nickAt < 4.6).length; } };

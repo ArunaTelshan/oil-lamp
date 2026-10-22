@@ -1,8 +1,10 @@
 // The night lake: sky, moon, stars, bare-tree shoreline, water,
-// reflections, mist, fireflies, the occasional bat, and foreground reeds.
+// reflections, mist, fireflies and foreground reeds, plus the Halloween
+// layer (trees, pumpkins, owl, witch, bats, ghost, wisps, wind).
 
 import { HORIZON, rng } from './layout.js';
 import { makeGlow } from './lamp-art.js';
+import { Halloween } from './halloween.js';
 
 const lerp = (a, b, t) => a + (b - a) * t;
 const mix = (c1, c2, t) => `rgb(${Math.round(lerp(c1[0], c2[0], t))},${Math.round(lerp(c1[1], c2[1], t))},${Math.round(lerp(c1[2], c2[2], t))})`;
@@ -13,9 +15,14 @@ export class Scene {
     this.mistSprite = makeGlow(256, [[0, 'rgba(178,186,214,0.9)'], [0.5, 'rgba(160,170,205,0.35)'], [1, 'rgba(150,160,200,0)']]);
     this.cloudSprite = makeGlow(256, [[0, 'rgba(14,16,34,0.95)'], [0.6, 'rgba(14,16,34,0.4)'], [1, 'rgba(14,16,34,0)']]);
     this.flyGlow = makeGlow(64, [[0, 'rgba(230,255,160,1)'], [0.3, 'rgba(200,255,120,0.35)'], [1, 'rgba(160,240,90,0)']]);
-    this.nextBat = 18 + Math.random() * 15;
-    this.bat = null;
-    this.batsEnabled = true;
+    this.hw = new Halloween();
+  }
+
+  // Height of the far shore at x (shared by trees, pumpkins and the house).
+  shoreY(x) {
+    const { W, H, hy } = this;
+    const edge = Math.pow(Math.abs(x / W - 0.5) * 2, 2);
+    return hy - H * (0.006 + 0.012 * Math.sin(x * 0.004 + 1) ** 2 + 0.035 * edge);
   }
 
   resize(W, H) {
@@ -34,7 +41,8 @@ export class Scene {
     this.moon = { x: W * 0.73, y: H * 0.165, r: H * 0.062 };
     this.moonDisk = this.renderMoon(this.moon.r);
 
-    // Shoreline with bare trees
+    // Halloween layer + shoreline with bare trees and a haunted house
+    this.hw.resize(W, H, this.hy, x => this.shoreY(x), this.moon);
     this.trees = this.renderTrees(W, H);
 
     // Mist banks
@@ -108,14 +116,13 @@ export class Scene {
     // Low rolling far shore
     g.beginPath();
     g.moveTo(0, hy + 1);
-    for (let x = 0; x <= W; x += W / 60) {
-      const edge = Math.pow(Math.abs(x / W - 0.5) * 2, 2);
-      const yy = hy - H * (0.006 + 0.012 * Math.sin(x * 0.004 + 1) ** 2 + 0.035 * edge);
-      g.lineTo(x, yy);
-    }
+    for (let x = 0; x <= W; x += W / 60) g.lineTo(x, this.shoreY(x));
     g.lineTo(W, hy + 1);
     g.closePath();
     g.fill();
+
+    this.hw.renderHouse(g, W * 0.835, this.shoreY(W * 0.835) + 2, H);
+    g.fillStyle = '#03040a';
 
     const branch = (x, y, len, ang, wid, depth) => {
       const x2 = x + Math.cos(ang) * len;
@@ -123,21 +130,21 @@ export class Scene {
       g.lineWidth = wid;
       g.beginPath();
       g.moveTo(x, y);
-      const bend = (rand() - 0.5) * len * 0.3;
+      const bend = (rand() - 0.5) * len * 0.6;
       g.quadraticCurveTo((x + x2) / 2 + bend, (y + y2) / 2 + bend * 0.3, x2, y2);
       g.stroke();
       if (depth <= 0 || len < 2) return;
       const kids = depth > 4 ? 2 : 2 + (rand() < 0.4 ? 1 : 0);
       for (let k = 0; k < kids; k++) {
         const spread = 0.35 + rand() * 0.5;
-        const na = ang + (k - (kids - 1) / 2) * spread + (rand() - 0.5) * 0.3;
+        const na = ang + (k - (kids - 1) / 2) * spread + (rand() - 0.5) * 0.6;
         branch(x2, y2, len * (0.62 + rand() * 0.18), na, wid * 0.66, depth - 1);
       }
     };
 
     // Trees: tall and gnarled at the edges, small and sparse in the middle.
     const tree = (x, h) => {
-      const base = hy - H * 0.005 - H * 0.03 * Math.pow(Math.abs(x / W - 0.5) * 2, 2);
+      const base = this.shoreY(x) + H * 0.004;
       branch(x, base + 2, h * 0.38, -Math.PI / 2 + (rand() - 0.5) * 0.2, Math.max(1.2, h * 0.045), 6);
     };
     for (let i = 0; i < 70; i++) {
@@ -234,7 +241,7 @@ export class Scene {
     }
     ctx.globalAlpha = 1;
 
-    this.drawBat(ctx, t, dt);
+    this.hw.drawSky(ctx, t, dt);
 
     // Water
     const water = ctx.createLinearGradient(0, hy, 0, H);
@@ -256,6 +263,7 @@ export class Scene {
     }
     ctx.globalAlpha = 1;
     ctx.drawImage(tc, 0, 0);
+    this.hw.drawFarLights(ctx, t);
 
     // Moon path on the water
     ctx.save();
@@ -295,8 +303,9 @@ export class Scene {
     const W = this.W;
     for (const m of this.mist) {
       if (m.far !== far) continue;
-      m.x += m.v * dt;
+      m.x += m.v * dt * (1 + this.hw.gust * 4 * this.hw.gustDir);
       if (m.x - m.w / 2 > W) m.x = -m.w / 2;
+      if (m.x + m.w / 2 < 0) m.x = W + m.w / 2;
       ctx.globalAlpha = m.a * amount;
       ctx.drawImage(this.mistSprite, m.x - m.w / 2, m.y - m.h / 2, m.w, m.h);
     }
@@ -317,44 +326,14 @@ export class Scene {
     ctx.restore();
   }
 
-  drawBat(ctx, t, dt) {
-    const { W, H } = this;
-    if (!this.bat) {
-      this.nextBat -= dt;
-      if (this.nextBat <= 0 && this.batsEnabled) {
-        const ltr = Math.random() < 0.5;
-        this.bat = { t: 0, dur: 6 + Math.random() * 3, ltr, y0: this.moon.y + (Math.random() - 0.5) * H * 0.12, amp: H * (0.02 + Math.random() * 0.03), s: H * (0.011 + Math.random() * 0.006) };
-        this.nextBat = 35 + Math.random() * 40;
-      }
-      return;
-    }
-    const b = this.bat;
-    b.t += dt;
-    const p = b.t / b.dur;
-    if (p >= 1) { this.bat = null; return; }
-    const x = b.ltr ? lerp(-W * 0.05, W * 1.05, p) : lerp(W * 1.05, -W * 0.05, p);
-    const y = b.y0 + Math.sin(p * 9) * b.amp;
-    const flap = Math.sin(t * 22);
-    const s = b.s;
-    ctx.save();
-    ctx.translate(x, y);
-    ctx.fillStyle = '#040408';
-    ctx.beginPath();
-    ctx.ellipse(0, 0, s * 0.25, s * 0.4, 0, 0, Math.PI * 2);
-    ctx.fill();
-    for (const dir of [-1, 1]) {
-      ctx.beginPath();
-      ctx.moveTo(0, -s * 0.1);
-      ctx.quadraticCurveTo(dir * s * 0.8, -s * (0.6 + flap * 0.9), dir * s * 1.6, -s * flap * 0.5);
-      ctx.quadraticCurveTo(dir * s * 1.0, -s * flap * 0.1 + s * 0.15, dir * s * 0.7, s * 0.2);
-      ctx.quadraticCurveTo(dir * s * 0.4, s * 0.05, 0, s * 0.15);
-      ctx.fill();
-    }
-    ctx.restore();
-  }
+  update(t, dt, L) { this.hw.update(t, dt, L); }
 
-  drawFront(ctx) {
+  drawWater(ctx, t, dt, L) { this.hw.drawWater(ctx, t, dt, L); }
+
+  drawFront(ctx, t) {
+    const lights = this.hw.drawFront(ctx, t);
     ctx.drawImage(this.reeds, 0, 0);
     ctx.drawImage(this.vignette, 0, 0);
+    this.hw.drawFrontLights(ctx, t, lights);
   }
 }
