@@ -2,9 +2,8 @@
 import { CONFIG } from './config.js';
 import { makeSlots, makeOrder, HORIZON } from './layout.js';
 import { makeGlow, GLOW_WARM, wobble, drawFlame, drawLampBody, wickPos } from './lamp-art.js';
-import { backendMode, cleanNickname, isBlocked, lightLampWithRetry, sendShake, shakeStats, notifyLit } from './backend.js';
+import { backendMode, cleanNickname, isBlocked, lightLampWithRetry, sendShake, shakeStats, notifyLit, loadTotal, total } from './backend.js';
 
-const N = CONFIG.TOTAL_LAMPS;
 const app = document.getElementById('app');
 const stage = document.getElementById('stage');
 const canvas = document.getElementById('lamp');
@@ -258,7 +257,7 @@ async function release(isRetry = false) {
   await minAnim;
   if (result.ok) {
     notifyLit(result.lamp);
-    const keep = { lamp: result.lamp, nickname: result.nickname, time: Date.now() };
+    const keep = { lamp: result.lamp, nickname: result.nickname, time: Date.now(), total: result.total || total() };
     try { localStorage.setItem(KEEP, JSON.stringify(keep)); } catch { /* ignore */ }
     showKeepsake(keep);
   } else if (result.error === 'full') {
@@ -290,15 +289,24 @@ function showKeepsake(k) {
   document.getElementById('kName').textContent = k.nickname;
   const t = new Date(k.time);
   const time = t.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-  document.getElementById('kMeta').textContent = `Lamp ${k.lamp} of ${N} · lit at ${time}`;
+  myTotal = k.total || total();
+  document.getElementById('kMeta').textContent = `Lamp ${k.lamp} of ${myTotal} · lit at ${time}`;
   myLamp = k.lamp;
   setStep('done');
   requestAnimationFrame(drawMap);
 }
 
 // ---------- Mini map of the lake ----------
-const SLOTS = makeSlots(CONFIG.LAYOUT_SEED, N);
-const ORDER = makeOrder(CONFIG.LAYOUT_SEED, N, SLOTS);
+// Lamp spots for the mini map (same layout as the big screen for this count).
+let myTotal = 0, layoutFor = 0, SLOTS = [], ORDER = [];
+function layout() {
+  const n = myTotal || total();
+  if (n !== layoutFor) {
+    layoutFor = n;
+    SLOTS = makeSlots(CONFIG.LAYOUT_SEED, n);
+    ORDER = makeOrder(CONFIG.LAYOUT_SEED, n, SLOTS);
+  }
+}
 let myLamp = 0;
 function drawMap(pulse = 0) {
   const m = document.getElementById('map');
@@ -306,6 +314,7 @@ function drawMap(pulse = 0) {
   if (!r.width) return;
   const d = Math.min(window.devicePixelRatio || 1, 2.5);
   if (m.width !== Math.round(r.width * d)) { m.width = Math.round(r.width * d); m.height = Math.round(r.height * d); }
+  layout();
   const g = m.getContext('2d');
   g.setTransform(d, 0, 0, d, 0, 0);
   const w = r.width, h = r.height;
@@ -322,7 +331,7 @@ function drawMap(pulse = 0) {
     g.beginPath(); g.arc(p.x, p.y, 0.8 + s.s * 1.2, 0, Math.PI * 2); g.fill();
   }
   if (myLamp) {
-    const s = SLOTS[ORDER[(myLamp - 1) % N]];
+    const s = SLOTS[ORDER[(myLamp - 1) % layoutFor]];
     const p = pos(s);
     const gs = 34 + pulse * 10;
     g.globalCompositeOperation = 'lighter';
@@ -515,6 +524,7 @@ window.addEventListener('pointerdown', e => {
 
 // ---------- Start ----------
 function init() {
+  loadTotal().then(() => { if (step === 'done') drawMap(); });
   if (new URLSearchParams(location.search).has('new')) {
     try { localStorage.removeItem(KEEP); localStorage.removeItem('lol_device'); } catch { /* ignore */ }
   }

@@ -1,6 +1,6 @@
 # Lake of Lights
 
-A digital lamp-lighting ceremony for 140 guests, set on a haunted Halloween lake. Guests scan a QR code, choose a nickname of up to 6 letters, then press and hold a clay lamp on their phone to light it and swipe the flame up. It arrives on the big screen as a floating lamp on a misty, moonlit lake, and the guest's nickname glows briefly above it. When the 140th lamp is lit, all the lamps drift together to spell **WELCOME**.
+A digital lamp-lighting ceremony (140 guests by default, adjustable without code), set on a haunted Halloween lake. Guests scan a QR code, choose a nickname of up to 6 letters, then press and hold a clay lamp on their phone to light it and swipe the flame up. It arrives on the big screen as a floating lamp on a misty, moonlit lake, and the guest's nickname glows briefly above it. When the 140th lamp is lit, all the lamps drift together to spell **WELCOME**.
 
 - **Guest page:** `index.html`. The QR code points here.
 - **Big screen:** `screen.html`.
@@ -30,6 +30,18 @@ A digital lamp-lighting ceremony for 140 guests, set on a haunted Halloween lake
 3. The project URL and publishable key are already in [`js/config.js`](js/config.js).
 
 **Never put the secret key (`sb_secret_...`) or the `service_role` key in this repo.** The publishable key is designed to be public. The database rules only let guests light a lamp through the `light_lamp` function, so nobody can edit or delete lamps directly.
+
+### Changing the number of guests (no code needed)
+The number of lamps lives in Supabase, not in the code:
+1. Supabase → **Table Editor** → `settings` → change `total_lamps` (1–500) → Save.
+   Or in the SQL Editor: `update public.settings set total_lamps = 150;`
+2. The big screen notices within about 10 seconds and reloads itself with the new number of lamp spots.
+   Phones pick it up the next time the page opens.
+
+Change it **before** the ceremony starts, then reset (`select public.reset_ceremony();`).
+- Lamps are sized to fit: bigger for small groups, smaller for big ones.
+- Below about 110 lamps, small tea-lights fill in the WELCOME letters so the word stays readable.
+- For testing without Supabase, add `&count=50` to a `?demo` or `?local` link.
 
 ### 2. GitHub Pages
 1. In the GitHub repo, open **Settings → Pages**.

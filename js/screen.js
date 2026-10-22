@@ -4,11 +4,11 @@ import { makeSlots, makeOrder, wordTargets, wordSpacing, matchTargets, HORIZON }
 import { makeGlow, GLOW_WARM, wobble, drawFlame, drawLampBody, drawWaterContact, drawReflection, wickPos } from './lamp-art.js';
 import { Scene } from './scene.js';
 import { LakeAudio } from './audio.js';
-import { backendMode, watchLamps, watchShakes } from './backend.js';
+import { backendMode, watchLamps, watchShakes, loadTotal } from './backend.js';
 
-const N = CONFIG.TOTAL_LAMPS;
+let N = CONFIG.TOTAL_LAMPS;   // replaced by the number in Supabase settings at start
 const WORD = CONFIG.FINALE_WORD || 'WELCOME';
-const MILESTONES = [Math.round(N * 0.25), Math.round(N * 0.5), Math.round(N * 0.75)];
+let MILESTONES = [];
 const params = new URLSearchParams(location.search);
 const MODE = backendMode();
 
@@ -24,11 +24,20 @@ scene.hw.onEvent = name => {
 const glow = makeGlow(128, GLOW_WARM);
 const ember = makeGlow(64, [[0, 'rgba(255,250,220,1)'], [0.25, 'rgba(255,200,110,0.7)'], [1, 'rgba(255,120,30,0)']]);
 
-const SLOTS = makeSlots(CONFIG.LAYOUT_SEED, N);
-const ORDER = makeOrder(CONFIG.LAYOUT_SEED, N, SLOTS);
+let SLOTS = [], ORDER = [];
+function setTotal(n) {
+  N = n;
+  MILESTONES = [Math.round(N * 0.25), Math.round(N * 0.5), Math.round(N * 0.75)];
+  SLOTS = makeSlots(CONFIG.LAYOUT_SEED, N);
+  ORDER = makeOrder(CONFIG.LAYOUT_SEED, N, SLOTS);
+}
 
 let W = 0, H = 0, DPR = 1, BASE = 30;
 let targets = [], finaleLampSize = 20;
+// With fewer than this many lamps, small extra tea-lights fill in the
+// letters during the finale so WELCOME stays readable.
+const FINALE_MIN_POINTS = 110;
+let fillers = [];
 
 const lamps = [];          // lamps on the lake (arriving or lit)
 const pending = [];        // lamps waiting for their arrival moment
@@ -77,11 +86,22 @@ function setCanvasSize() {
 function resize() {
   W = window.innerWidth; H = window.innerHeight;
   setCanvasSize();
-  BASE = H * 0.047;
+  // Lamp size: a little bigger for small groups, smaller for big ones.
+  BASE = H * 0.047 * Math.max(0.55, Math.min(1.25, Math.sqrt(140 / N)));
   scene.resize(W, H);
   resizeLightMap();
-  targets = wordTargets(WORD, N, W, H);
-  finaleLampSize = wordSpacing(WORD, N, W, H) * 0.78;
+  const P = Math.max(N, FINALE_MIN_POINTS);
+  const all = wordTargets(WORD, P, W, H);
+  finaleLampSize = wordSpacing(WORD, P, W, H) * 0.78;
+  if (P === N) { targets = all; fillers = []; } else {
+    const pick = new Set();
+    for (let i = 0; i < N; i++) pick.add(Math.floor(((i + 0.5) * P) / N));
+    targets = all.filter((_, i) => pick.has(i));
+    fillers = all.filter((_, i) => !pick.has(i)).map(t => ({
+      x: t.x, y: t.y, seed: Math.random() * 100,
+      jx: (Math.random() - 0.5) * 0.36, jy: (Math.random() - 0.5) * 0.3, sizeVar: 0.5 + Math.random() * 0.15,
+    }));
+  }
   if (finale) {
     for (const L of lamps) { const p = slotPos(L); L.from = { x: p.x, y: p.y, s: p.s }; }
     assignTargets();
@@ -638,11 +658,43 @@ function frameBody() {
     drawLampBodyPass(L, p, inten);
     shown.push([L, p, inten]);
   }
+  // Tea-lights that complete the letters (small groups only)
+  const fillerA = finale && finale.t0 !== null && fillers.length ? clamp01((now - finale.t0 - 3.5) / 4) : 0;
+  const fillerPos = [];
+  if (fillerA > 0) {
+    for (const f of fillers) {
+      const d = formedFloat(f, f, finaleLampSize);
+      const p = { x: f.x + d.x, y: f.y + d.y, s: finaleLampSize * f.sizeVar };
+      const depth = clamp01((p.y - H * HORIZON) / (H * (1 - HORIZON)));
+      p.x += scene.cam.x * (0.35 + 0.6 * depth);
+      p.y += scene.cam.y * (0.35 + 0.6 * depth);
+      const k = p.s / S0;
+      ctx.globalAlpha = fillerA;
+      ctx.drawImage(BODY.c, p.x - BODY.ox * k, p.y - BODY.oy * k, BODY.c.width * k, BODY.c.height * k);
+      const w = wickPos(p.x, p.y, p.s);
+      const g = p.s * 4 * LM;
+      lctx.globalAlpha = 0.4 * fillerA;
+      lctx.drawImage(glow, w.x * LM - g / 2, (w.y - p.s * 0.4) * LM - g / 2, g, g);
+      fillerPos.push([f, p, w]);
+    }
+    ctx.globalAlpha = 1;
+  }
   ctx.save();
   ctx.globalCompositeOperation = 'lighter';
   ctx.drawImage(lm, 0, 0, W, H);
   ctx.restore();
   for (const [L, p, inten] of shown) drawLampFlamePass(L, p, inten);
+  for (const [f, p, w] of fillerPos) {
+    const fh = p.s * 0.95 * (1 + 0.07 * wobble(now, f.seed)) * 1.1;
+    const k = fh / H0;
+    ctx.save();
+    ctx.globalAlpha = fillerA;
+    ctx.translate(w.x, w.y);
+    ctx.transform(1, 0, -0.08 * wobble(now * 0.6, f.seed + 9) - scene.hw.gust * scene.hw.gustDir * 0.3, 1, 0, 0);
+    ctx.scale(k, k);
+    ctx.drawImage(FLAME.c, -FLAME.bx, -FLAME.by);
+    ctx.restore();
+  }
   for (const { L, p } of placed) drawNickname(L, p);
 
   // Rising embers once WELCOME is formed.
@@ -727,7 +779,11 @@ const modeNote = {
 }[MODE];
 document.getElementById('mode').textContent = modeNote;
 
-(document.fonts ? document.fonts.load('600 40px Cinzel').catch(() => {}) : Promise.resolve()).finally(() => {
+Promise.all([
+  document.fonts ? document.fonts.load('600 40px Cinzel').catch(() => {}) : Promise.resolve(),
+  loadTotal().then(setTotal),
+]).finally(() => {
+  if (!SLOTS.length) setTotal(N);
   resize();
   if (MODE !== 'demo') {
     const watcher = watchLamps({

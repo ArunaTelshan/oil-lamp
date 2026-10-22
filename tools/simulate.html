@@ -24,15 +24,16 @@
   <p id="mode"></p>
   <div class="warn" id="warn" hidden>This writes to the <b>live Supabase database</b>. Afterwards, reset it in Supabase → SQL Editor:<br><code>select public.reset_ceremony();</code></div>
   <label for="count">Number of guests</label>
-  <input id="count" type="number" min="1" max="200" value="140">
+  <input id="count" type="number" min="1" max="600" value="150">
   <label for="secs">Spread over (seconds)</label>
   <input id="secs" type="number" min="0" max="600" value="60">
   <br><button id="go">Start</button>
   <pre id="out">Ready.</pre>
 </main>
 <script type="module">
-  import { backendMode, lightLamp } from '../js/backend.js';
+  import { backendMode, lightLamp, loadTotal } from '../js/backend.js';
   const mode = backendMode();
+  loadTotal().then(n => { document.getElementById('count').value = n + 10; });
   document.getElementById('mode').textContent = `Mode: ${mode}` + (mode === 'local' ? ' (open ../screen.html?local in this same browser to watch)' : '');
   if (mode === 'supabase') document.getElementById('warn').hidden = false;
   const out = document.getElementById('out');

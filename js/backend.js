@@ -58,6 +58,31 @@ async function getJSON(url, opts = {}, ms = 6000) {
   }
 }
 
+// ---------- How many lamps tonight ----------
+// Comes from the `settings` table in Supabase (change it in the Table Editor,
+// no code needed). Local/demo testing can use ?count=50 in the address.
+let currentTotal = CONFIG.TOTAL_LAMPS;
+export function total() { return currentTotal; }
+
+export async function loadTotal() {
+  const mode = backendMode();
+  const fromUrl = Number(params.get('count'));
+  if (mode !== 'supabase') {
+    if (fromUrl >= 1 && fromUrl <= 500) currentTotal = Math.round(fromUrl);
+    return currentTotal;
+  }
+  for (let i = 0; i < 3; i++) {
+    try {
+      const rows = await getJSON(`${CONFIG.SUPABASE_URL}/rest/v1/settings?select=total_lamps&id=eq.1`, { headers: headers(), cache: 'no-store' });
+      if (rows.length && rows[0].total_lamps >= 1) { currentTotal = rows[0].total_lamps; break; }
+      break; // no settings row yet (old schema): keep the default
+    } catch {
+      await new Promise(r => setTimeout(r, 800));
+    }
+  }
+  return currentTotal;
+}
+
 // ---------- Guest: light a lamp ----------
 // Returns { ok, lamp, nickname, repeat, total } or { ok:false, error }.
 // Network failures throw, so the caller can retry.
@@ -128,6 +153,12 @@ export function watchLamps({ onLamps, onStatus, onReset }) {
         const chk = await getJSON(`${base}?select=created_at&id=eq.${last}`, opts);
         if (!chk.length || chk[0].created_at !== lastCreated) { onReset && onReset(); return; }
       }
+      // Every ~10 checks: was the number of lamps changed in Supabase?
+      if (polls % 10 === 5) {
+        const st = await getJSON(`${CONFIG.SUPABASE_URL}/rest/v1/settings?select=total_lamps&id=eq.1`, opts).catch(() => null);
+        const n = st && st.length ? st[0].total_lamps : null;
+        if (Number.isInteger(n) && n !== currentTotal) { onReset && onReset(); return; }
+      }
       fails = 0;
       onStatus && onStatus(true);
     } catch {
@@ -165,13 +196,13 @@ async function localLight(nickname, device) {
   if (isBlocked(nick)) return { ok: false, error: 'blocked_nickname' };
   const lamps = readLocal();
   const mine = lamps.find(l => l.device_id === device);
-  if (mine) return { ok: true, lamp: mine.id, nickname: mine.nickname, repeat: true, total: CONFIG.TOTAL_LAMPS };
-  if (lamps.length >= CONFIG.TOTAL_LAMPS) return { ok: false, error: 'full', total: CONFIG.TOTAL_LAMPS };
+  if (mine) return { ok: true, lamp: mine.id, nickname: mine.nickname, repeat: true, total: currentTotal };
+  if (lamps.length >= currentTotal) return { ok: false, error: 'full', total: currentTotal };
   const lamp = { id: lamps.length + 1, nickname: nick, device_id: device };
   lamps.push(lamp);
   localStorage.setItem(LKEY, JSON.stringify(lamps));
   channel && channel.postMessage({ type: 'lamp' });
-  return { ok: true, lamp: lamp.id, nickname: nick, repeat: false, total: CONFIG.TOTAL_LAMPS };
+  return { ok: true, lamp: lamp.id, nickname: nick, repeat: false, total: currentTotal };
 }
 
 export function resetLocal() {

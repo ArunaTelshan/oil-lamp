@@ -7,6 +7,8 @@ export const CONFIG = {
   SUPABASE_URL: 'https://tlkybfjmzcgqdlgohlwh.supabase.co',
   SUPABASE_ANON_KEY: 'sb_publishable_ocEjwsH3tEPa7ci-AfWGGA_Jp9ioK9Q',
 
+  // Default number of lamps. The real number comes from Supabase:
+  // Table Editor → settings → total_lamps (no code change needed).
   TOTAL_LAMPS: 140,
   FINALE_WORD: 'WELCOME',
 

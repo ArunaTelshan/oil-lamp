@@ -2,15 +2,35 @@
 -- Paste this whole file into Supabase → SQL Editor → New query → Run.
 -- Safe to run more than once.
 
--- 1. The lamps table: one row per lit lamp (id = lamp number 1..140).
+-- 0. Settings (one row). To change the number of guests/lamps:
+--    Supabase → Table Editor → settings → edit total_lamps (1–500), then
+--    reload the big screen. Or run:  update public.settings set total_lamps = 150;
+create table if not exists public.settings (
+  id           int primary key default 1 check (id = 1),
+  total_lamps  int not null default 140 check (total_lamps between 1 and 500)
+);
+insert into public.settings (id, total_lamps) values (1, 140) on conflict (id) do nothing;
+alter table public.settings enable row level security;
+drop policy if exists "Anyone can read settings" on public.settings;
+create policy "Anyone can read settings"
+  on public.settings for select
+  to anon, authenticated
+  using (true);
+revoke insert, update, delete, truncate on public.settings from anon, authenticated;
+grant select on public.settings to anon, authenticated;
+
+-- 1. The lamps table: one row per lit lamp (id = lamp number).
 create table if not exists public.lamps (
-  id          int primary key check (id between 1 and 140),
+  id          int primary key check (id between 1 and 500),
   nickname    text not null check (nickname ~ '^[A-Z]{1,6}$'),
   device_id   uuid not null unique,
   created_at  timestamptz not null default now()
 );
 
--- Nicknames may be up to 6 letters (updates a table made by an older version).
+-- Updates for tables made by an older version of this script:
+alter table public.lamps drop constraint if exists lamps_id_check;
+alter table public.lamps add constraint lamps_id_check check (id between 1 and 500);
+-- Nicknames may be up to 6 letters.
 alter table public.lamps drop constraint if exists lamps_nickname_check;
 alter table public.lamps add constraint lamps_nickname_check check (nickname ~ '^[A-Z]{1,6}$');
 
@@ -31,7 +51,8 @@ grant select on public.lamps to anon, authenticated;
 -- 3. light_lamp: hands out the next lamp number, one guest at a time.
 --    Nicknames: 1–6 letters A–Z.
 --    - Same phone asking again gets its existing lamp back.
---    - Returns {ok:false, error:'full'} once all 140 are lit.
+--    - Returns {ok:false, error:'full'} once all lamps are lit
+--      (the number comes from public.settings).
 create or replace function public.light_lamp(p_nickname text, p_device uuid)
 returns json
 language plpgsql
@@ -39,7 +60,7 @@ security definer
 set search_path = public
 as $$
 declare
-  v_total    constant int := 140;
+  v_total    int;
   v_nick     text;
   v_existing public.lamps;
   v_count    int;
@@ -68,6 +89,8 @@ begin
 
   -- Only one light_lamp runs at a time, so numbers never collide.
   perform pg_advisory_xact_lock(140140);
+
+  select coalesce((select total_lamps from public.settings where id = 1), 140) into v_total;
 
   select * into v_existing from public.lamps where device_id = p_device;
   if found then
