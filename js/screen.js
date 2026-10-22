@@ -431,8 +431,8 @@ function drawNickname(L, p) {
   const size = Math.round(H * 0.022 + p.s * 0.22);
   const y = p.y - p.s * 1.5 - easeOut(age / DUR) * H * 0.05;
   ctx.save();
-  ctx.font = `600 ${size}px Cinzel, Georgia, serif`;
-  try { ctx.letterSpacing = `${Math.round(size * 0.18)}px`; } catch { /* older browsers */ }
+  ctx.font = `${Math.round(size * 1.15)}px Creepster, Cinzel, Georgia, serif`;
+  try { ctx.letterSpacing = `${Math.round(size * 0.08)}px`; } catch { /* older browsers */ }
   ctx.textAlign = 'center';
   ctx.textBaseline = 'alphabetic';
   ctx.globalAlpha = a;
@@ -650,29 +650,82 @@ canvas.addEventListener('dblclick', e => {
   saveQR();
 });
 
-// ---------- Operator overlay (only shown when H is pressed) ----------
+// ---------- Lamp counter (C to show / hide) ----------
+let showCounter = true;
+try { showCounter = localStorage.getItem('lol_counter') !== 'off'; } catch { /* ignore */ }
+let counterAlpha = 0, counterShown = -1, counterPulse = 0;
+function drawCounter(dt) {
+  const target = showCounter && !finale ? 1 : 0;
+  counterAlpha += (target - counterAlpha) * Math.min(1, dt * 2.5);
+  if (litCount !== counterShown) { if (counterShown >= 0) counterPulse = 1; counterShown = litCount; }
+  counterPulse = Math.max(0, counterPulse - dt * 2.5);
+  if (counterAlpha < 0.01) return;
+  const big = Math.round(H * 0.07), small = Math.round(H * 0.036);
+  const x = W / 2, y = H * 0.1;
+  ctx.save();
+  ctx.globalAlpha = counterAlpha;
+  ctx.textBaseline = 'alphabetic';
+  ctx.font = `${big}px Creepster, Cinzel, serif`;
+  const num = String(litCount);
+  const numW = ctx.measureText(num).width;
+  ctx.font = `${small}px Creepster, Cinzel, serif`;
+  const rest = ` / ${N}`;
+  const restW = ctx.measureText(rest).width;
+  const left = x - (numW + restW) / 2;
+  const flick = 0.85 + 0.15 * Math.sin(now * 7) * Math.sin(now * 3.1);
+  ctx.shadowColor = `rgba(255,120,30,${0.9 * flick})`;
+  ctx.shadowBlur = big * 0.35;
+  const grad = ctx.createLinearGradient(0, y - big, 0, y);
+  grad.addColorStop(0, '#ffe7a3');
+  grad.addColorStop(0.6, '#ffaa3c');
+  grad.addColorStop(1, '#e0561a');
+  ctx.fillStyle = grad;
+  // The number swells for a moment each time a lamp is lit.
+  const sc = 1 + counterPulse * 0.18;
+  ctx.save();
+  ctx.translate(left + numW / 2, y - big * 0.35);
+  ctx.scale(sc, sc);
+  ctx.font = `${big}px Creepster, Cinzel, serif`;
+  ctx.textAlign = 'center';
+  ctx.fillText(num, 0, big * 0.35);
+  ctx.restore();
+  ctx.font = `${small}px Creepster, Cinzel, serif`;
+  ctx.textAlign = 'left';
+  ctx.fillStyle = 'rgba(255,214,150,0.85)';
+  ctx.fillText(rest, left + numW, y);
+  ctx.shadowBlur = 0;
+  ctx.font = `600 ${Math.round(H * 0.013)}px Cinzel, serif`;
+  try { ctx.letterSpacing = `${Math.round(H * 0.005)}px`; } catch { /* older browsers */ }
+  ctx.textAlign = 'center';
+  ctx.fillStyle = 'rgba(243,230,200,0.7)';
+  ctx.fillText('LAMPS LIT', x, y + H * 0.03);
+  ctx.restore();
+}
+
+// ---------- Operator help (H or the small ? on the left) ----------
+const helpEl = document.getElementById('help');
+const helpBtn = document.getElementById('helpBtn');
+function setHelp(on) {
+  showHelp = on;
+  helpEl.hidden = !on;
+  helpBtn.classList.toggle('open', on);
+}
+helpBtn.addEventListener('click', () => setHelp(!showHelp));
+setInterval(() => {
+  if (!showHelp) return;
+  document.getElementById('helpStatus').textContent =
+    `Lamps lit: ${litCount} / ${N} · waiting: ${pending.length} · mode: ${MODE}\n` +
+    `${fpsShown} fps · quality ${Math.round(quality * 100)}% · counter ${showCounter ? 'on' : 'off'}\n` +
+    `Last lamp check: ${lastLampCheck ? Math.round(now - lastLampCheck) + 's ago' : '—'} · phone shakes: ${shakeStatus}${frameErrors ? ` · frame errors: ${frameErrors}` : ''}\n` +
+    `Guest link: ${guestUrl()}`;
+}, 500);
+
 function drawOperator() {
+  // A small red dot means the screen has lost its connection (it keeps retrying).
   if (!connectionOk) {
     ctx.fillStyle = 'rgba(255,60,60,0.7)';
     ctx.beginPath(); ctx.arc(14, 14, 5, 0, Math.PI * 2); ctx.fill();
   }
-  if (!showHelp) return;
-  const lines = [
-    `Lamps lit: ${litCount} / ${N}   ·   waiting: ${pending.length}   ·   mode: ${MODE}   ·   ${fpsShown} fps   ·   quality ${Math.round(quality * 100)}%`,
-    `Guest link: ${guestUrl()}`,
-    `Phone shakes: ${shakeStatus}   ·   last lamp check: ${lastLampCheck ? Math.round(now - lastLampCheck) + 's ago' : '—'}${frameErrors ? `   ·   frame errors: ${frameErrors}` : ''}`,
-    'F fullscreen · M mute · Q show/hide QR · H hide this panel',
-    MODE === 'demo' ? 'Space add a lamp · D pause/resume demo' : '',
-    'Shift+R replay finale (after all lamps are lit)',
-  ].filter(Boolean);
-  ctx.save();
-  ctx.font = '15px system-ui, sans-serif';
-  const w = Math.max(...lines.map(l => ctx.measureText(l).width)) + 32;
-  ctx.fillStyle = 'rgba(0,0,0,0.75)';
-  ctx.fillRect(16, 16, w, lines.length * 24 + 20);
-  ctx.fillStyle = '#f3e6c8';
-  lines.forEach((l, i) => ctx.fillText(l, 32, 42 + i * 24));
-  ctx.restore();
 }
 
 // ---------- Main loop ----------
@@ -824,6 +877,7 @@ function frameBody() {
   scene.drawFireflies(ctx, now, 1 - (formed ? 0.5 : 0));
   scene.drawFront(ctx, now);
   drawQR(dt);
+  drawCounter(dt);
   drawOperator();
 }
 
@@ -870,7 +924,16 @@ window.addEventListener('keydown', e => {
     if (document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen();
   } else if (k === 'm') audio.toggleMute();
   else if (k === 'q') qrVisible = !qrVisible;
-  else if (k === 'h') showHelp = !showHelp;
+  else if (k === 'h' || k === '?') setHelp(!showHelp);
+  else if (k === 'c') {
+    showCounter = !showCounter;
+    try { localStorage.setItem('lol_counter', showCounter ? 'on' : 'off'); } catch { /* ignore */ }
+  }
+  else if (k === 'w' && !e.shiftKey) { scene.hw.witch = null; scene.hw.launchWitch(); }
+  else if (k === 'k') scene.hw.launchSkeleton();
+  else if (k === 'o') scene.hw.owlArrive();
+  else if (k === 'b') scene.hw.launchBats();
+  else if (k === 'g') scene.hw.launchGhost();
   else if (k === 'r' && e.shiftKey) replayFinale();
   else if (MODE === 'demo' && k === ' ') { e.preventDefault(); demoAdd(); }
   else if (MODE === 'demo' && k === 'd') { demoOn = !demoOn; demoLoop(); }
@@ -894,7 +957,7 @@ const modeNote = {
 document.getElementById('mode').textContent = modeNote;
 
 Promise.all([
-  document.fonts ? document.fonts.load('600 40px Cinzel').catch(() => {}) : Promise.resolve(),
+  document.fonts ? Promise.all([document.fonts.load('600 40px Cinzel'), document.fonts.load('40px Creepster')]).catch(() => {}) : Promise.resolve(),
   loadTotal().then(setTotal),
 ]).finally(() => {
   if (!SLOTS.length) setTotal(N);

@@ -9,7 +9,9 @@ A digital lamp-lighting ceremony (140 guests by default, adjustable without code
 ### What's on the big screen
 - **Scene:** a misty, moonlit lake framed by two gnarled, claw-branched trees. One branch crosses the moon.
 - **Lights:** jack-o'-lanterns glow on the near bank, smaller ones dot the far shore, and a haunted house there has flickering windows.
-- **Trees:** new spooky trees every time the screen opens (set `SCENE_SEED` in `js/config.js` to keep the same ones).
+- **Trees:** new spooky trees every time the screen opens (set `SCENE_SEED` in `js/config.js` to keep the same ones). Every branch sways in the breeze on its own rhythm.
+  - The far shore mixes bare trees, pines, round crowns, poplars, dead snags and bushes in clumps, with a hazier row behind for depth.
+- **Lettering:** the counter, nicknames and the phone's title use the Halloween font *Creepster*.
 - **Creatures:**
   - owls that come and go, flying in to land on branches and flying off again, plus a spider that slowly lowers itself on its thread
   - every few minutes, a skeleton claws its way out of the pumpkin bank, rattles along it, and tumbles into the lake with a splash (its skull bobs up once)
@@ -94,15 +96,18 @@ A phone normally lights only one lamp. For testing, tap the **moon** on the phon
 3. Guests scan the QR code in the corner of the screen. No words appear on the big screen apart from the nicknames and, at the end, WELCOME.
 
 ### Operator keys (big screen)
+Move the mouse and a small **?** appears on the left edge. Click it (or press `H`) to see all commands. It hides again when the mouse is still, so the audience never sees it.
 
 | Key | What it does |
 |---|---|
 | `F` | Fullscreen on/off |
-| `M` | Mute/unmute |
+| `C` | Show/hide the lamp counter ("37 / 140 · lamps lit", top centre; it fades out for the finale). Remembered on this laptop |
 | `Q` | Show/hide the QR code |
 | Mouse | **Drag the QR code** to move it, drag its corner (or scroll over it) to resize, double-click it to reset. Its place is remembered on this laptop |
-| `H` | Operator panel (lamp count, mode, guest link). Press again to hide |
-| `Shift+R` | Replay the WELCOME finale (only after all 140 are lit) |
+| `M` | Sound on/off |
+| `H` | Commands panel, with live status (lamp count, connection, frame rate) |
+| `W` `K` `O` `B` `G` | Summon now: **W**itch across the moon, s**K**eleton walks into the lake, an **O**wl flies in, **B**ats, **G**host in the mist |
+| `Shift+R` | Replay the WELCOME finale (only after all lamps are lit) |
 | `Space` / `D` | Demo mode only: add a lamp / pause or resume |
 
 **Laptop settings for the night:** turn off sleep and the screensaver, and keep the screen page as the visible tab. Browsers pause pages that are hidden or minimised.

@@ -6,7 +6,7 @@
   <title>Lake of Lights</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600;700&family=Cormorant+Garamond:ital,wght@0,500;1,500&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Creepster&family=Cinzel:wght@500;600;700&family=Cormorant+Garamond:ital,wght@0,500;1,500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="css/screen.css">
 </head>
 <body>
@@ -19,9 +19,37 @@
       <h1>Lake of Lights</h1>
       <p class="start-cta">Click anywhere to begin</p>
       <p class="start-mode" id="mode"></p>
-      <p class="start-keys">F fullscreen · M mute · Q show/hide QR · H operator panel</p>
+      <p class="start-keys">F fullscreen · C counter · Q QR code · M sound · H all commands</p>
     </div>
   </div>
+
+  <!-- Operator help: a small ? on the left edge (appears when the mouse moves) -->
+  <button id="helpBtn" class="help-btn" type="button" aria-label="Show commands" title="Commands (H)">?</button>
+  <aside id="help" class="help" hidden aria-label="Commands">
+    <h2>Commands</h2>
+    <dl>
+      <dt>F</dt><dd>Fullscreen on / off</dd>
+      <dt>C</dt><dd>Show / hide the lamp counter</dd>
+      <dt>Q</dt><dd>Show / hide the QR code</dd>
+      <dt>Mouse</dt><dd>Drag the QR to move it · drag its corner or scroll to resize · double-click to reset</dd>
+      <dt>M</dt><dd>Sound on / off</dd>
+      <dt>H</dt><dd>Show / hide this panel</dd>
+    </dl>
+    <h3>Summon now</h3>
+    <dl>
+      <dt>W</dt><dd>Witch across the moon</dd>
+      <dt>K</dt><dd>Skeleton walks into the lake</dd>
+      <dt>O</dt><dd>An owl flies in</dd>
+      <dt>B</dt><dd>Bats fly past</dd>
+      <dt>G</dt><dd>Ghost in the mist</dd>
+    </dl>
+    <h3>Rehearsal</h3>
+    <dl>
+      <dt>Shift+R</dt><dd>Replay the finale (after all lamps are lit)</dd>
+      <dt>Space · D</dt><dd>Demo mode only: add a lamp · pause / resume</dd>
+    </dl>
+    <pre id="helpStatus" class="help-status"></pre>
+  </aside>
 
   <script src="js/vendor/qrcode.js"></script>
   <script type="module" src="js/screen.js"></script>

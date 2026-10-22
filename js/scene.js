@@ -128,7 +128,10 @@ export class Scene {
     return c;
   }
 
-  // Far shore: rolling hills, crooked bare trees (random each time), house.
+  // Far shore, random each time: a hazy ridge with a back row of trees, then
+  // the dark shoreline with a varied front row — bare trees of different
+  // shapes, pines, round crowns, narrow poplars, dead snags and bushes,
+  // growing in clumps with gaps (taller towards the edges).
   renderTrees(W, H) {
     const pad = Math.ceil(W * 0.04);         // extra width so the parallax never shows an edge
     const c = document.createElement('canvas');
@@ -137,10 +140,141 @@ export class Scene {
     g.translate(pad, 0);
     const hy = this.hy;
     const rand = rng(this.seed + 31);
-    g.fillStyle = '#03040a';
-    g.strokeStyle = '#03040a';
+    const FAR = '#141127', NEAR = '#03040a';
     g.lineCap = 'round';
+    g.lineJoin = 'round';
 
+    // ---- tree shapes ----
+    const bare = (x, base, h, col) => {
+      const spread = 0.3 + rand() * 0.5, decay = 0.58 + rand() * 0.16, wobble = 0.3 + rand() * 0.5;
+      const depth = rand() < 0.5 ? 5 : 6;
+      const br = (bx, by, len, ang, wid, d) => {
+        const x2 = bx + Math.cos(ang) * len, y2 = by + Math.sin(ang) * len;
+        g.lineWidth = Math.max(0.7, wid);
+        g.beginPath();
+        g.moveTo(bx, by);
+        const bend = (rand() - 0.5) * len * wobble;
+        g.quadraticCurveTo((bx + x2) / 2 + bend, (by + y2) / 2 + bend * 0.3, x2, y2);
+        g.stroke();
+        if (d <= 0 || len < 2) return;
+        const kids = d > 3 ? 2 : 2 + (rand() < 0.4 ? 1 : 0);
+        for (let k = 0; k < kids; k++) {
+          const na = ang + (k - (kids - 1) / 2) * spread * (0.7 + rand() * 0.6) + (rand() - 0.5) * 0.5;
+          br(x2, y2, len * (decay + rand() * 0.12), na, wid * 0.66, d - 1);
+        }
+      };
+      g.strokeStyle = col;
+      br(x, base, h * (0.3 + rand() * 0.15), -Math.PI / 2 + (rand() - 0.5) * 0.35, Math.max(1, h * 0.045), depth);
+    };
+    const pine = (x, base, h, col) => {
+      const tiers = 5 + Math.floor(rand() * 5);
+      const w0 = h * (0.24 + rand() * 0.14);
+      const lean = (rand() - 0.5) * h * 0.06;
+      const right = [], left = [];
+      for (let i = 0; i < tiers; i++) {
+        const f = (i + 1) / tiers;
+        const y = base - h + f * h * 0.9;
+        const hw = w0 * f * (0.75 + rand() * 0.5);
+        const cx = x + lean * (1 - f);
+        right.push([cx + hw, y], [cx + hw * 0.4, y - h * 0.03]);
+        left.push([cx - hw * (0.85 + rand() * 0.3), y], [cx - hw * 0.4, y - h * 0.03]);
+      }
+      g.fillStyle = col;
+      g.beginPath();
+      g.moveTo(x + lean, base - h);
+      for (const [px, py] of right) g.lineTo(px, py);
+      g.lineTo(x + w0 * 0.12, base);
+      g.lineTo(x - w0 * 0.12, base);
+      for (let i = left.length - 1; i >= 0; i--) g.lineTo(left[i][0], left[i][1]);
+      g.closePath();
+      g.fill();
+    };
+    const round = (x, base, h, col) => {
+      const lean = (rand() - 0.5) * h * 0.12;
+      g.strokeStyle = col; g.fillStyle = col;
+      g.lineWidth = Math.max(1, h * 0.05);
+      g.beginPath(); g.moveTo(x, base); g.lineTo(x + lean, base - h * 0.5); g.stroke();
+      const r = h * (0.26 + rand() * 0.1), cx = x + lean, cy = base - h * 0.68;
+      const n = 6 + Math.floor(rand() * 6);
+      for (let i = 0; i < n; i++) {
+        const a = rand() * 6.28, d = rand() * r * 0.6;
+        g.beginPath();
+        g.arc(cx + Math.cos(a) * d * 1.2, cy + Math.sin(a) * d * 0.8, r * (0.35 + rand() * 0.3), 0, Math.PI * 2);
+        g.fill();
+      }
+    };
+    const poplar = (x, base, h, col) => {
+      g.fillStyle = col;
+      const n = 6 + Math.floor(rand() * 4);
+      for (let i = 0; i < n; i++) {
+        const f = i / (n - 1);
+        g.beginPath();
+        g.arc(x + (rand() - 0.5) * h * 0.04, base - h * (0.15 + f * 0.8), h * (0.09 - f * 0.04) * (0.8 + rand() * 0.4), 0, Math.PI * 2);
+        g.fill();
+      }
+    };
+    const snag = (x, base, h, col) => {
+      g.strokeStyle = col;
+      const bend = (rand() - 0.5) * h * 0.2;
+      g.lineWidth = Math.max(1, h * 0.05);
+      g.beginPath(); g.moveTo(x, base); g.quadraticCurveTo(x + bend, base - h * 0.5, x + bend * 0.6, base - h * (0.8 + rand() * 0.2)); g.stroke();
+      const stubs = 2 + Math.floor(rand() * 3);
+      for (let i = 0; i < stubs; i++) {
+        const f = 0.35 + rand() * 0.5, sx = x + bend * f, sy = base - h * f * 0.9;
+        const dir = rand() < 0.5 ? -1 : 1, len = h * (0.1 + rand() * 0.18);
+        g.lineWidth = Math.max(0.8, h * 0.02);
+        g.beginPath(); g.moveTo(sx, sy); g.lineTo(sx + dir * len, sy - len * (0.2 + rand() * 0.6)); g.stroke();
+      }
+    };
+    const bush = (x, base, h, col) => {
+      g.fillStyle = col;
+      const n = 3 + Math.floor(rand() * 4);
+      for (let i = 0; i < n; i++) {
+        g.beginPath();
+        g.arc(x + (rand() - 0.5) * h * 0.9, base - h * (0.12 + rand() * 0.2), h * (0.2 + rand() * 0.15), 0, Math.PI * 2);
+        g.fill();
+      }
+    };
+    const pick = weights => {
+      let r = rand() * weights.reduce((a, [, w]) => a + w, 0);
+      for (const [fn, w] of weights) { if ((r -= w) <= 0) return fn; }
+      return weights[0][0];
+    };
+    const NEAR_KINDS = [[bare, 40], [pine, 18], [round, 14], [snag, 11], [poplar, 8], [bush, 9]];
+    const FAR_KINDS = [[bare, 30], [pine, 30], [round, 25], [poplar, 10], [bush, 5]];
+    const edgeOf = x => Math.min(1, Math.abs(x / W - 0.5) * 2);
+
+    // Groves: clumps of trees with open gaps between them.
+    const groves = (yAt, kinds, col, hMin, hEdge, density) => {
+      let x = -pad;
+      while (x < W + pad) {
+        const e = edgeOf(x);
+        const groveLen = W * (0.02 + rand() * 0.12) * (0.6 + e);
+        const end = x + groveLen;
+        while (x < end) {
+          const ee = edgeOf(x);
+          const h = H * (hMin + hEdge * Math.pow(ee, 2) * (0.5 + rand() * 0.8)) * (0.6 + rand() * 0.7);
+          pick(kinds)(x, yAt(x) + H * 0.004, h, col);
+          x += W * (0.004 + rand() * 0.014) / density;
+        }
+        x += W * (0.01 + rand() * 0.07) * (1.6 - e);
+      }
+    };
+
+    // Back ridge, hazy (further away = paler)
+    const ph = rand() * 6.28;
+    const ridgeY = x => this.shoreY(x) - H * (0.012 + 0.012 * (0.5 + 0.5 * Math.sin(x * 0.0023 + ph)) + 0.005 * Math.sin(x * 0.011 + ph * 2));
+    g.fillStyle = FAR;
+    g.beginPath();
+    g.moveTo(-pad, hy + 1);
+    for (let x = -pad; x <= W + pad; x += W / 80) g.lineTo(x, ridgeY(x));
+    g.lineTo(W + pad, hy + 1);
+    g.closePath();
+    g.fill();
+    groves(ridgeY, FAR_KINDS, FAR, 0.012, 0.035, 1.3);
+
+    // Near shoreline
+    g.fillStyle = NEAR;
     g.beginPath();
     g.moveTo(-pad, hy + 1);
     for (let x = -pad; x <= W + pad; x += W / 60) g.lineTo(x, this.shoreY(x));
@@ -149,38 +283,10 @@ export class Scene {
     g.fill();
 
     this.hw.renderHouse(g, W * 0.835, this.shoreY(W * 0.835) + 2, H);
-    g.fillStyle = '#03040a';
-
-    const branch = (x, y, len, ang, wid, depth) => {
-      const x2 = x + Math.cos(ang) * len;
-      const y2 = y + Math.sin(ang) * len;
-      g.lineWidth = wid;
-      g.beginPath();
-      g.moveTo(x, y);
-      const bend = (rand() - 0.5) * len * 0.6;
-      g.quadraticCurveTo((x + x2) / 2 + bend, (y + y2) / 2 + bend * 0.3, x2, y2);
-      g.stroke();
-      if (depth <= 0 || len < 2) return;
-      const kids = depth > 4 ? 2 : 2 + (rand() < 0.4 ? 1 : 0);
-      for (let k = 0; k < kids; k++) {
-        const spread = 0.35 + rand() * 0.5;
-        const na = ang + (k - (kids - 1) / 2) * spread + (rand() - 0.5) * 0.6;
-        branch(x2, y2, len * (0.62 + rand() * 0.18), na, wid * 0.66, depth - 1);
-      }
-    };
-    const tree = (x, h) => {
-      branch(x, this.shoreY(x) + H * 0.004, h * 0.38, -Math.PI / 2 + (rand() - 0.5) * 0.25, Math.max(1.2, h * 0.045), 6);
-    };
-    const count = 60 + Math.floor(rand() * 25);
-    for (let i = 0; i < count; i++) {
-      const u = rand();
-      const x = u < 0.5 ? Math.pow(rand(), 1.8) * W * 0.42 - pad * 0.5 : W - Math.pow(rand(), 1.8) * W * 0.42 + pad * 0.5;
-      const edge = Math.min(1, Math.abs(x / W - 0.5) * 2);
-      tree(x, H * (0.03 + 0.11 * Math.pow(edge, 2.2) * (0.6 + rand() * 0.6)));
-    }
-    const small = 12 + Math.floor(rand() * 14);
-    for (let i = 0; i < small; i++) tree(W * (0.28 + rand() * 0.44), H * (0.012 + rand() * 0.03));
-    branch(W * (0.04 + rand() * 0.06), hy + 2, H * (0.09 + rand() * 0.04), -Math.PI / 2 + 0.12, H * 0.012, 7);
+    groves(x => this.shoreY(x), NEAR_KINDS, NEAR, 0.016, 0.1, 1);
+    // One great dead tree near the left edge
+    g.strokeStyle = NEAR;
+    bare(W * (0.04 + rand() * 0.06), hy + 2, H * (0.2 + rand() * 0.08), NEAR);
     return { canvas: c, pad };
   }
 

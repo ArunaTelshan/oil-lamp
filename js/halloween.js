@@ -12,12 +12,18 @@ const lerp = (a, b, t) => a + (b - a) * t;
 const clamp01 = v => Math.max(0, Math.min(1, v));
 
 // ---------- Trees ----------
+let BOUNDS = null;   // while set, every stroke grows this box (to crop branch layers)
 function seg(g, x1, y1, x2, y2, w) {
   g.lineWidth = Math.max(0.6, w);
   g.beginPath();
   g.moveTo(x1, y1);
   g.lineTo(x2, y2);
   g.stroke();
+  if (BOUNDS) {
+    const m = w + 2;
+    BOUNDS.x1 = Math.min(BOUNDS.x1, x1 - m, x2 - m); BOUNDS.y1 = Math.min(BOUNDS.y1, y1 - m, y2 - m);
+    BOUNDS.x2 = Math.max(BOUNDS.x2, x1 + m, x2 + m); BOUNDS.y2 = Math.max(BOUNDS.y2, y1 + m, y2 + m);
+  }
 }
 
 // A thin twisting branch that ends in a hooked, claw-like tip.
@@ -86,7 +92,7 @@ function pointAlong(path, f) {
 // Branch points that are roughly level and up in the sky: where owls can sit.
 function findPerches(paths, W, H, moon) {
   const out = [];
-  for (const path of paths) {
+  for (const { path, limb } of paths) {
     for (let i = 3; i < path.length - 3; i += 2) {
       const [x1, y1] = path[i - 2], [x2, y2] = path[i + 2];
       const dx = x2 - x1, dy = y2 - y1;
@@ -95,7 +101,7 @@ function findPerches(paths, W, H, moon) {
       if (y < H * 0.1 || y > H * 0.42 || x < W * 0.05 || x > W * 0.95) continue;
       if (moon && Math.hypot(x - moon.x, y - moon.y) < moon.r * 1.7) continue;
       if (out.some(p => Math.hypot(p.x - x, p.y - y) < W * 0.07)) continue;
-      out.push({ x, y });
+      out.push({ x, y, limb });
     }
   }
   return out;
@@ -103,69 +109,103 @@ function findPerches(paths, W, H, moon) {
 
 // Each tree is generated from a seed, so every screen opening shows new,
 // different trees — always framing the lake, one branch always across the moon.
+// The trunk is one picture; every main branch is its own small picture that
+// sways on its own around the point where it joins the trunk.
 function renderTree(W, H, side, seed, moon) {
   const x0 = side === 'left' ? 0 : Math.floor(W * 0.5);
-  const c = document.createElement('canvas');
-  c.width = Math.ceil(W * 0.5); c.height = H;
-  const g = c.getContext('2d');
-  g.translate(-x0, 0);
-  g.strokeStyle = SIL;
-  g.fillStyle = SIL;
-  g.lineCap = 'round';
-  g.lineJoin = 'round';
+  // Work area (a little bigger than the tree's half of the screen).
+  const X0 = x0 - Math.ceil(W * 0.06), Y0 = -Math.ceil(H * 0.12);
+  const work = document.createElement('canvas');
+  work.width = Math.ceil(W * 0.62); work.height = Math.ceil(H * 1.13);
+  const wg = work.getContext('2d');
   const rand = rng(seed);
   const J = (v, a) => v + (rand() - 0.5) * 2 * a;
   const P = pts => pts.map(([x, y]) => [x * W, y * H]);
-  const branches = [];
-  const info = { canvas: c, x0, base: null, perches: [], spider: null };
   const mx = moon.x / W, my = moon.y / H, mr = moon.r / H;
+  const info = { trunk: null, limbs: [], perches: [], spider: null, base: null };
 
+  // Draw something on the work canvas and cut out just the part it covers.
+  const capture = fn => {
+    wg.setTransform(1, 0, 0, 1, 0, 0);
+    wg.clearRect(0, 0, work.width, work.height);
+    wg.setTransform(1, 0, 0, 1, -X0, -Y0);
+    wg.strokeStyle = SIL; wg.fillStyle = SIL; wg.lineCap = 'round'; wg.lineJoin = 'round';
+    BOUNDS = { x1: Infinity, y1: Infinity, x2: -Infinity, y2: -Infinity };
+    const ret = fn(wg);
+    const b = BOUNDS; BOUNDS = null;
+    const bx = Math.max(X0, Math.floor(b.x1)), by = Math.max(Y0, Math.floor(b.y1));
+    const bx2 = Math.min(X0 + work.width, Math.ceil(b.x2)), by2 = Math.min(Y0 + work.height, Math.ceil(b.y2));
+    const c = document.createElement('canvas');
+    c.width = Math.max(1, bx2 - bx); c.height = Math.max(1, by2 - by);
+    c.getContext('2d').drawImage(work, bx - X0, by - Y0, c.width, c.height, 0, 0, c.width, c.height);
+    return { canvas: c, x: bx, y: by, ret };
+  };
+  // A swaying branch layer, pivoting where it leaves the trunk.
+  const branch = (pts, w0, w1, twigs = true, pxPts = false) => {
+    const pp = pxPts ? pts : P(pts);
+    const L = capture(g => limb(g, pp, w0, w1, rand, H, twigs));
+    L.path = L.ret;
+    L.px = pp[0][0]; L.py = pp[0][1];
+    L.sway = { amp: 0.004 + rand() * 0.005, f1: 0.55 + rand() * 0.5, f2: 1.4 + rand() * 0.9, ph: rand() * 6.28, gust: 0.008 + rand() * 0.008 };
+    info.limbs.push(L);
+    return info.limbs.length - 1;
+  };
+
+  let trunk, tp;
   if (side === 'left') {
     const bx = J(0.032, 0.01);
     info.base = [bx * W, H];
-    const tp = [[bx, 1.03], [J(bx + 0.013, 0.008), 0.86], [J(bx, 0.01), 0.71], [J(bx + 0.02, 0.01), 0.56], [J(bx + 0.016, 0.008), 0.44], [J(bx + 0.037, 0.012), J(0.3, 0.03)]];
-    const trunk = limb(g, P(tp), W * J(0.05, 0.007), W * 0.022, rand, H, false);
-    for (let k = 0; k < 4; k++) {
-      const p = pointAlong(trunk, [0.03, 0.06, 0.35, 0.6][k]);
-      twig(g, p[0], p[1], [Math.PI * 0.95, -0.15, -0.6, Math.PI + 0.5][k] + J(0, 0.25), H * J(0.055, 0.015), W * 0.012, 1, 0.15, rand);
-    }
+    tp = [[bx, 1.03], [J(bx + 0.013, 0.008), 0.86], [J(bx, 0.01), 0.71], [J(bx + 0.02, 0.01), 0.56], [J(bx + 0.016, 0.008), 0.44], [J(bx + 0.037, 0.012), J(0.3, 0.03)]];
+    const T = capture(g => {
+      const tr = limb(g, P(tp), W * J(0.05, 0.007), W * 0.022, rand, H, false);
+      for (let k = 0; k < 4; k++) {
+        const p = pointAlong(tr, [0.03, 0.06, 0.35, 0.6][k]);
+        twig(g, p[0], p[1], [Math.PI * 0.95, -0.15, -0.6, Math.PI + 0.5][k] + J(0, 0.25), H * J(0.055, 0.015), W * 0.012, 1, 0.15, rand);
+      }
+      return tr;
+    });
+    info.trunk = T; trunk = T.ret;
     const top = tp[5], mid = tp[4];
     const aEx = J(0.3, 0.035), aEy = J(0.255, 0.035);
-    branches.push(limb(g, P([[mid[0], 0.445], [J(0.11, 0.015), J(0.405, 0.015)], [J(0.17, 0.02), J(0.38, 0.025)], [J(0.23, 0.02), J(0.33, 0.03)], [aEx - 0.03, aEy + 0.025], [aEx, aEy], [aEx + 0.022, aEy + 0.015]]), W * 0.018, W * 0.003, rand, H));
-    const B = limb(g, P([top, [J(0.1, 0.02), J(0.2, 0.03)], [J(0.15, 0.025), J(0.125, 0.025)], [J(0.22, 0.03), J(0.065, 0.02)], [J(0.3, 0.03), J(0.035, 0.015)], [J(0.37, 0.03), 0.02]]), W * 0.02, W * 0.003, rand, H);
-    branches.push(B);
-    limb(g, P([top, [J(0.05, 0.015), 0.19], [J(0.062, 0.015), 0.09], [J(0.035, 0.015), -0.03]]), W * 0.017, W * 0.007, rand, H);
-    limb(g, P([[mid[0] + 0.01, 0.37], [0.0, J(0.3, 0.03)], [-0.02, 0.28]]), W * 0.012, W * 0.006, rand, H, false);
+    branch([[mid[0], 0.445], [J(0.11, 0.015), J(0.405, 0.015)], [J(0.17, 0.02), J(0.38, 0.025)], [J(0.23, 0.02), J(0.33, 0.03)], [aEx - 0.03, aEy + 0.025], [aEx, aEy], [aEx + 0.022, aEy + 0.015]], W * 0.018, W * 0.003);
+    const bi = branch([top, [J(0.1, 0.02), J(0.2, 0.03)], [J(0.15, 0.025), J(0.125, 0.025)], [J(0.22, 0.03), J(0.065, 0.02)], [J(0.3, 0.03), J(0.035, 0.015)], [J(0.37, 0.03), 0.02]], W * 0.02, W * 0.003);
+    branch([top, [J(0.05, 0.015), 0.19], [J(0.062, 0.015), 0.09], [J(0.035, 0.015), -0.03]], W * 0.017, W * 0.007);
+    branch([[mid[0] + 0.01, 0.37], [0.0, J(0.3, 0.03)], [-0.02, 0.28]], W * 0.012, W * 0.006, false);
     const extra = 1 + Math.floor(rand() * 2);
     for (let k = 0; k < extra; k++) {
       const s = pointAlong(trunk, 0.78 + rand() * 0.17);
       const ex = J(0.19, 0.06), ey = J(0.2, 0.07);
-      branches.push(limb(g, [s, [(s[0] + ex * W) / 2, Math.min(s[1], ey * H) - H * J(0.04, 0.03)], [ex * W, ey * H]], W * 0.011, W * 0.0025, rand, H));
+      branch([s, [(s[0] + ex * W) / 2, Math.min(s[1], ey * H) - H * J(0.04, 0.03)], [ex * W, ey * H]], W * 0.011, W * 0.0025, true, true);
     }
-    info.spider = pointAlong(B, 0.6 + rand() * 0.2);
+    const sp = pointAlong(info.limbs[bi].path, 0.6 + rand() * 0.2);
+    info.spider = { x: sp[0], y: sp[1], limb: bi };
   } else {
     const bx = J(0.976, 0.01);
     info.base = [bx * W, H];
-    const tp = [[bx, 1.03], [J(bx - 0.01, 0.008), 0.8], [J(bx, 0.01), 0.63], [J(bx - 0.02, 0.01), 0.47], [J(bx - 0.024, 0.01), J(0.32, 0.03)]];
-    const trunk = limb(g, P(tp), W * J(0.045, 0.006), W * 0.02, rand, H, false);
-    for (let k = 0; k < 3; k++) {
-      const p = pointAlong(trunk, [0.03, 0.4, 0.7][k]);
-      twig(g, p[0], p[1], [-0.1, Math.PI + 0.7, -0.5][k] + J(0, 0.25), H * J(0.045, 0.012), W * 0.01, 1, -0.15, rand);
-    }
+    tp = [[bx, 1.03], [J(bx - 0.01, 0.008), 0.8], [J(bx, 0.01), 0.63], [J(bx - 0.02, 0.01), 0.47], [J(bx - 0.024, 0.01), J(0.32, 0.03)]];
+    const T = capture(g => {
+      const tr = limb(g, P(tp), W * J(0.045, 0.006), W * 0.02, rand, H, false);
+      for (let k = 0; k < 3; k++) {
+        const p = pointAlong(tr, [0.03, 0.4, 0.7][k]);
+        twig(g, p[0], p[1], [-0.1, Math.PI + 0.7, -0.5][k] + J(0, 0.25), H * J(0.045, 0.012), W * 0.01, 1, -0.15, rand);
+      }
+      return tr;
+    });
+    info.trunk = T; trunk = T.ret;
     // The branch across the moon (passes through its lower half).
     const s = pointAlong(trunk, 0.82);
-    branches.push(limb(g, P([[s[0] / W, s[1] / H], [J(0.9, 0.012), J(0.355, 0.02)], [J(0.84, 0.015), J(0.29, 0.02)], [mx + 0.055, my + mr * 0.95], [mx, my + mr * J(0.32, 0.22)], [mx - 0.04, my + mr * J(0.1, 0.15)], [mx - 0.075, my - 0.008]]), W * 0.016, W * 0.0028, rand, H));
+    branch([[s[0] / W, s[1] / H], [J(0.9, 0.012), J(0.355, 0.02)], [J(0.84, 0.015), J(0.29, 0.02)], [mx + 0.055, my + mr * 0.95], [mx, my + mr * J(0.32, 0.22)], [mx - 0.04, my + mr * J(0.1, 0.15)], [mx - 0.075, my - 0.008]], W * 0.016, W * 0.0028);
     const top = tp[4];
-    limb(g, P([top, [J(0.932, 0.012), 0.2], [J(0.95, 0.012), 0.1], [J(0.925, 0.012), 0.0], [0.905, -0.04]]), W * 0.018, W * 0.006, rand, H);
-    branches.push(limb(g, P([[top[0] - 0.002, top[1] + 0.03], [J(0.885, 0.015), J(0.25, 0.02)], [J(0.865, 0.012), J(0.15, 0.02)], [J(0.84, 0.012), 0.075]]), W * 0.011, W * 0.003, rand, H));
+    branch([top, [J(0.932, 0.012), 0.2], [J(0.95, 0.012), 0.1], [J(0.925, 0.012), 0.0], [0.905, -0.04]], W * 0.018, W * 0.006);
+    branch([[top[0] - 0.002, top[1] + 0.03], [J(0.885, 0.015), J(0.25, 0.02)], [J(0.865, 0.012), J(0.15, 0.02)], [J(0.84, 0.012), 0.075]], W * 0.011, W * 0.003);
     const extra = 1 + Math.floor(rand() * 2);
     for (let k = 0; k < extra; k++) {
       const p = pointAlong(trunk, 0.7 + rand() * 0.2);
       const ex = J(0.86, 0.035), ey = J(0.38, 0.04);
-      branches.push(limb(g, [p, [(p[0] + ex * W) / 2, Math.min(p[1], ey * H) - H * 0.03], [ex * W, ey * H]], W * 0.01, W * 0.0025, rand, H));
+      branch([p, [(p[0] + ex * W) / 2, Math.min(p[1], ey * H) - H * 0.03], [ex * W, ey * H]], W * 0.01, W * 0.0025, true, true);
     }
   }
-  info.perches = findPerches(branches, W, H, moon);
+  info.perches = findPerches(info.limbs.map((L, i) => ({ path: L.path, limb: i })), W, H, moon);
   return info;
 }
 
@@ -925,23 +965,26 @@ export class Halloween {
     const lights = [];
     ctx.save();
     ctx.translate(cam.x, cam.y);
-    for (const [tree, ph, side] of [[this.left, 0, 'left'], [this.right, 2.1, 'right']]) {
-      // Trees bend with the wind gusts (kept still otherwise: cheaper to draw).
-      const ang = this.gust * (0.007 + 0.0015 * Math.sin(t * 2.3 + ph)) * this.gustDir;
-      ctx.save();
-      if (ang !== 0) {
-        ctx.translate(tree.base[0], tree.base[1]);
+    for (const [tree, side] of [[this.left, 'left'], [this.right, 'right']]) {
+      ctx.drawImage(tree.trunk.canvas, tree.trunk.x, tree.trunk.y);
+      // Each branch sways in the breeze on its own rhythm; gusts bend them more.
+      tree.limbs.forEach((L, idx) => {
+        const sw = L.sway;
+        const breeze = Math.sin(t * sw.f1 + sw.ph) + 0.4 * Math.sin(t * sw.f2 + sw.ph * 1.7);
+        const ang = sw.amp * breeze * (1 + this.gust * 2.5) + this.gust * this.gustDir * sw.gust;
+        ctx.save();
+        ctx.translate(L.px, L.py);
         ctx.rotate(ang);
-        ctx.translate(-tree.base[0], -tree.base[1]);
-      }
-      ctx.drawImage(tree.canvas, tree.x0, 0);
-      for (const o of this.owls) {
-        if (o.state !== 'perched') continue;
-        const p = this.perches[o.perch];
-        if (p.tree === side) lights.push(...this.drawOwl(ctx, o, p.x, p.y - H * 0.004, t));
-      }
-      if (tree.spider) this.drawSpider(ctx, tree.spider[0], tree.spider[1], t);
-      ctx.restore();
+        ctx.translate(-L.px, -L.py);
+        ctx.drawImage(L.canvas, L.x, L.y);
+        for (const o of this.owls) {
+          if (o.state !== 'perched') continue;
+          const p = this.perches[o.perch];
+          if (p.tree === side && p.limb === idx) lights.push(...this.drawOwl(ctx, o, p.x, p.y - H * 0.004, t));
+        }
+        if (tree.spider && tree.spider.limb === idx) this.drawSpider(ctx, tree.spider.x, tree.spider.y, t);
+        ctx.restore();
+      });
     }
 
     // Owls in flight

@@ -77,10 +77,10 @@ body {
 }
 h1 {
   margin: 6px 0 0;
-  font-family: 'Cinzel', Georgia, serif;
-  font-weight: 500;
-  font-size: 24px;
-  letter-spacing: 0.14em;
+  font-family: 'Creepster', 'Cinzel', Georgia, serif;
+  font-weight: 400;
+  font-size: 34px;
+  letter-spacing: 0.08em;
   color: var(--gold);
   text-shadow: 0 0 22px rgba(255, 160, 60, 0.45);
 }
@@ -229,10 +229,10 @@ h2 {
   box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4), inset 0 0 30px rgba(255, 170, 70, 0.06);
 }
 .k-name {
-  font-family: 'Cinzel', Georgia, serif;
-  font-size: 34px;
-  letter-spacing: 0.3em;
-  padding-left: 0.3em;
+  font-family: 'Creepster', 'Cinzel', Georgia, serif;
+  font-size: 44px;
+  letter-spacing: 0.14em;
+  padding-left: 0.14em;
   color: var(--gold);
   text-shadow: 0 0 18px rgba(255, 170, 70, 0.7);
 }
@@ -254,7 +254,7 @@ h2 {
 }
 
 @media (max-height: 640px) {
-  h1 { font-size: 22px; }
+  h1 { font-size: 28px; }
   #map { height: 72px; }
   #nick { font-size: 22px; padding: 11px 14px; }
   .sub { margin-bottom: 10px; }

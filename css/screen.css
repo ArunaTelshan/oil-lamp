@@ -23,9 +23,9 @@ canvas { display: block; }
 #start.hidden { opacity: 0; pointer-events: none; }
 .start-inner { padding: 24px; }
 #start h1 {
-  font-family: 'Cinzel', Georgia, serif;
-  font-weight: 500;
-  letter-spacing: 0.32em;
+  font-family: 'Creepster', 'Cinzel', Georgia, serif;
+  font-weight: 400;
+  letter-spacing: 0.12em;
   font-size: clamp(28px, 4vw, 54px);
   margin: 18px 0 10px;
   color: #ffe2a8;
@@ -50,3 +50,49 @@ canvas { display: block; }
   40% { transform: scale(0.94, 1.06) rotate(2deg); }
   100% { transform: scale(1.04, 0.96) rotate(-1deg); }
 }
+
+/* ---------- Operator help ---------- */
+.help-btn {
+  position: fixed;
+  left: 14px; top: 50%;
+  width: 36px; height: 36px;
+  margin-top: -18px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 214, 140, 0.6);
+  background: rgba(8, 6, 16, 0.6);
+  color: #ffd98a;
+  font: 22px/34px 'Creepster', Georgia, serif;
+  text-align: center;
+  padding: 0;
+  cursor: pointer;
+  z-index: 3;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.4s;
+}
+/* Visible only while the mouse is moving (never in front of the audience) */
+body:not(.nocursor) .help-btn, .help-btn.open { opacity: 0.85; pointer-events: auto; }
+.help-btn:hover { opacity: 1; box-shadow: 0 0 14px rgba(255, 170, 70, 0.6); }
+.help {
+  position: fixed;
+  left: 62px; top: 50%;
+  transform: translateY(-50%);
+  width: min(380px, calc(100vw - 80px));
+  max-height: calc(100vh - 40px);
+  overflow: auto;
+  padding: 16px 20px 14px;
+  border: 1px solid rgba(255, 214, 140, 0.35);
+  border-radius: 14px;
+  background: rgba(8, 6, 16, 0.86);
+  color: #f3e6c8;
+  font: 14px/1.45 system-ui, sans-serif;
+  z-index: 3;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+}
+.help[hidden] { display: none; }
+.help h2 { margin: 0 0 8px; font: 28px 'Creepster', Georgia, serif; letter-spacing: 0.06em; color: #ffb347; }
+.help h3 { margin: 12px 0 6px; font: 600 12px system-ui, sans-serif; letter-spacing: 0.14em; text-transform: uppercase; color: #e9c27a; }
+.help dl { display: grid; grid-template-columns: auto 1fr; gap: 5px 12px; margin: 0; }
+.help dt { font: 600 12px ui-monospace, Menlo, monospace; color: #1b130c; background: #f3e1b4; border-radius: 5px; padding: 2px 7px; align-self: start; white-space: nowrap; }
+.help dd { margin: 0; }
+.help-status { margin: 12px 0 0; padding-top: 10px; border-top: 1px solid rgba(255, 214, 140, 0.2); font: 12px/1.5 ui-monospace, Menlo, monospace; color: #cbbd9c; white-space: pre-wrap; }
