@@ -35,13 +35,12 @@
       <!-- 1. Nickname -->
       <div class="step" data-for="name">
         <h2>Name your light</h2>
-        <p class="sub">Up to 4 letters. It will glow on the lake.</p>
-        <label class="cells" for="nick">
-          <span class="cell"></span><span class="cell"></span><span class="cell"></span><span class="cell"></span>
+        <p class="sub">Up to 6 letters. It will glow on the lake.</p>
+        <div class="name-field">
           <input id="nick" type="text" inputmode="text" autocomplete="off" autocorrect="off"
-                 autocapitalize="characters" spellcheck="false" maxlength="4" enterkeyhint="go"
-                 aria-label="Nickname, up to 4 letters">
-        </label>
+                 autocapitalize="characters" spellcheck="false" maxlength="6" enterkeyhint="go"
+                 placeholder="Your name" aria-label="Nickname, up to 6 letters">
+        </div>
         <p class="error" id="nickError" aria-live="polite"></p>
         <button id="continue" class="btn" disabled>Continue</button>
       </div>

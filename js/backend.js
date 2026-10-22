@@ -37,11 +37,11 @@ export function deviceId() {
 }
 
 export function cleanNickname(s) {
-  return (s || '').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 4);
+  return (s || '').toUpperCase().replace(/[^A-Z]/g, '').slice(0, CONFIG.NICK_MAX);
 }
 
 export function isBlocked(nick) {
-  return CONFIG.BLOCKED.includes(nick);
+  return CONFIG.BLOCKED.includes(nick) || CONFIG.BLOCKED_PARTS.some(w => nick.includes(w));
 }
 
 // fetch + read JSON, giving up after `ms` (a stalled mobile connection can

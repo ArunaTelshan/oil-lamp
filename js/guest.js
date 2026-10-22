@@ -11,7 +11,6 @@ const canvas = document.getElementById('lamp');
 const ctx = canvas.getContext('2d');
 const ring = document.querySelector('#ring circle');
 const nickInput = document.getElementById('nick');
-const cells = [...document.querySelectorAll('.cell')];
 const nickError = document.getElementById('nickError');
 const continueBtn = document.getElementById('continue');
 const glow = makeGlow(128, GLOW_WARM);
@@ -64,22 +63,24 @@ function lampGeom() {
 }
 
 // ---------- Nickname ----------
-function renderCells() {
-  const v = nickInput.value;
-  cells.forEach((c, i) => {
-    c.textContent = v[i] || '';
-    c.classList.toggle('active', document.activeElement === nickInput && i === Math.min(v.length, 3));
-  });
-  continueBtn.disabled = v.length < 1;
+function updateContinue() {
+  continueBtn.disabled = cleanNickname(nickInput.value).length < 1;
 }
-nickInput.addEventListener('input', () => {
-  const clean = cleanNickname(nickInput.value);
-  if (clean !== nickInput.value) nickInput.value = clean;
+// Letters only. While a phone keyboard is still composing a word (Android),
+// leave the text alone — changing it mid-word breaks typing.
+let composing = false;
+function tidyNick() {
+  const v = nickInput.value;
+  const clean = cleanNickname(v);
+  if (clean !== v.toUpperCase()) nickInput.value = clean;
+}
+nickInput.addEventListener('compositionstart', () => { composing = true; });
+nickInput.addEventListener('compositionend', () => { composing = false; tidyNick(); updateContinue(); });
+nickInput.addEventListener('input', e => {
+  if (!composing && !e.isComposing) tidyNick();
   nickError.textContent = '';
-  renderCells();
+  updateContinue();
 });
-nickInput.addEventListener('focus', renderCells);
-nickInput.addEventListener('blur', renderCells);
 nickInput.addEventListener('keydown', e => { if (e.key === 'Enter' && !continueBtn.disabled) continueBtn.click(); });
 
 continueBtn.addEventListener('click', () => {
@@ -268,7 +269,7 @@ async function release(isRetry = false) {
     fly = { t0: now, dir: 'down' };
     nickError.textContent = 'Please choose a different name.';
     nickInput.value = '';
-    renderCells();
+    updateContinue();
     flameK = 0; hold = 0;
     setStep('name');
   }
@@ -490,7 +491,7 @@ function startOver() {
   myLamp = 0; nickname = ''; flameK = 0; flare = 0; hold = 0; fly = null; lift = 0;
   nickInput.value = '';
   nickError.textContent = '';
-  renderCells();
+  updateContinue();
   setStep('name');
   chime([1318.5, 987.77, 659.25], 0.04);
 }
@@ -521,7 +522,7 @@ function init() {
     if (needsPermission()) window.addEventListener('click', () => enableMotion(), { once: true });
   } else {
     setStep('name');
-    renderCells();
+    updateContinue();
   }
   requestAnimationFrame(frame);
 }

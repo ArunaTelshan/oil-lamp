@@ -1,6 +1,6 @@
 # Lake of Lights
 
-A digital lamp-lighting ceremony for 140 guests, set on a haunted Halloween lake. Guests scan a QR code, choose a nickname of up to 4 letters, then press and hold a clay lamp on their phone to light it and swipe the flame up. It arrives on the big screen as a floating lamp on a misty, moonlit lake, and the guest's nickname glows briefly above it. When the 140th lamp is lit, all the lamps drift together to spell **WELCOME**.
+A digital lamp-lighting ceremony for 140 guests, set on a haunted Halloween lake. Guests scan a QR code, choose a nickname of up to 6 letters, then press and hold a clay lamp on their phone to light it and swipe the flame up. It arrives on the big screen as a floating lamp on a misty, moonlit lake, and the guest's nickname glows briefly above it. When the 140th lamp is lit, all the lamps drift together to spell **WELCOME**.
 
 - **Guest page:** `index.html`. The QR code points here.
 - **Big screen:** `screen.html`.
@@ -22,7 +22,7 @@ A digital lamp-lighting ceremony for 140 guests, set on a haunted Halloween lake
 
 ### 1. Supabase (5 minutes)
 1. Open your project at [supabase.com](https://supabase.com) → **SQL Editor** → **New query**.
-2. Paste the whole of [`supabase/schema.sql`](supabase/schema.sql), then click **Run**. It should say "Success". Running it again is safe.
+2. Paste the whole of [`supabase/schema.sql`](supabase/schema.sql), then click **Run**. It should say "Success". Running it again is safe. Re-run it whenever this file changes (for example, the 6-letter nickname update).
 3. The project URL and publishable key are already in [`js/config.js`](js/config.js).
 
 **Never put the secret key (`sb_secret_...`) or the `service_role` key in this repo.** The publishable key is designed to be public. The database rules only let guests light a lamp through the `light_lamp` function, so nobody can edit or delete lamps directly.

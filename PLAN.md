@@ -27,7 +27,7 @@ A digital lamp-lighting ceremony for the AIS Halloween party. 140 guests scan a 
 
 ### Guest phone
 1. **Opening:** a small dark lake scene with one unlit clay lamp. "Light your lamp for tonight."
-2. **Nickname:** up to four letter boxes (like an OTP input), auto-uppercase, letters A–Z only.
+2. **Nickname:** a single text field, up to 6 letters A–Z, shown in capitals.
 3. **Hold to light:** press and hold the lamp. The wick glows, sparks, then catches. The phone vibrates on Android (iPhones don't allow web pages to vibrate).
 4. **Release to the lake:** swipe up (or tap "Send to the lake"). The flame lifts off the phone screen, while the request goes to the server in the background with automatic retries.
 5. **Keepsake card:** "Lamp #37 of 140 · NIMA · lit 7:42 PM" with the flame still burning, a mini lake map marking where their lamp is, and "Look for NIMA on the big screen." It's worth a screenshot.
@@ -63,7 +63,7 @@ A digital lamp-lighting ceremony for the AIS Halloween party. 140 guests scan a 
 ### Database (Supabase)
 - **Table `lamps`:**
   - `id` 1–140, primary key (the lamp number)
-  - `nickname` must be 1–4 letters A–Z
+  - `nickname` must be 1–6 letters A–Z
   - `device_id` unique (a random id saved on the guest's phone)
   - `created_at`
 - **Function `light_lamp(nickname, device_id)`:**
@@ -141,7 +141,7 @@ README.md           Setup + event-day checklist
 
 ## 6. Decisions (confirmed)
 
-- Nicknames: **up to 4 letters**, A–Z, **duplicates allowed**, with a small blocklist of rude words.
+- Nicknames: **up to 6 letters**, A–Z, **duplicates allowed**, with a small blocklist of rude words.
 - Backend: **Supabase**. Hosting: **GitHub Pages**.
 - **No words on the big screen**: no counter, no subtitle, no logo, no countdown text. Only the nicknames, which glow briefly, and WELCOME at the end. The build-up for the last lamps is wordless: a heartbeat sound and a pulsing moon.
 - The screen is **8×6 (4:3)**, so the scene is composed for 4:3 (it still adapts to other shapes).

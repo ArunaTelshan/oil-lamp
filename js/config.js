@@ -26,7 +26,13 @@ export const CONFIG = {
     'FAG','FAGS','CUM','CUMS','TITS','TIT','ANUS','ARSE','ASS','BOOB',
     'PORN','SEX','SEXY','RAPE','NAZI','KKK','NIGG','NIGA','HOE','HOES',
     'WANK','JIZZ','BICH','BTCH','PUSY','WTF','STFU',
+    'BITCH','WHORE','PUSSY','DILDO','PENIS','VAGINA','RAPIST','SLUTS','BOOBS',
+    'DICKS','COCKS','TWATS','WANKER','BASTRD','ASSHOL','NIGGA','NIGGER','HITLER',
   ],
+  // Refused anywhere inside a nickname.
+  BLOCKED_PARTS: ['FUCK', 'CUNT', 'NIGG'],
+
+  NICK_MAX: 6,
 };
 
 export function isConfigured() {

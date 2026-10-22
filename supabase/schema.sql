@@ -5,10 +5,14 @@
 -- 1. The lamps table: one row per lit lamp (id = lamp number 1..140).
 create table if not exists public.lamps (
   id          int primary key check (id between 1 and 140),
-  nickname    text not null check (nickname ~ '^[A-Z]{1,4}$'),
+  nickname    text not null check (nickname ~ '^[A-Z]{1,6}$'),
   device_id   uuid not null unique,
   created_at  timestamptz not null default now()
 );
+
+-- Nicknames may be up to 6 letters (updates a table made by an older version).
+alter table public.lamps drop constraint if exists lamps_nickname_check;
+alter table public.lamps add constraint lamps_nickname_check check (nickname ~ '^[A-Z]{1,6}$');
 
 -- 2. Security: anyone may read lamps (the big screen needs this),
 --    nobody may write to the table directly. Guests can only light a
@@ -25,6 +29,7 @@ revoke insert, update, delete, truncate on public.lamps from anon, authenticated
 grant select on public.lamps to anon, authenticated;
 
 -- 3. light_lamp: hands out the next lamp number, one guest at a time.
+--    Nicknames: 1–6 letters A–Z.
 --    - Same phone asking again gets its existing lamp back.
 --    - Returns {ok:false, error:'full'} once all 140 are lit.
 create or replace function public.light_lamp(p_nickname text, p_device uuid)
@@ -42,7 +47,7 @@ declare
 begin
   v_nick := upper(regexp_replace(coalesce(p_nickname, ''), '[^A-Za-z]', '', 'g'));
 
-  if length(v_nick) < 1 or length(v_nick) > 4 then
+  if length(v_nick) < 1 or length(v_nick) > 6 then
     return json_build_object('ok', false, 'error', 'bad_nickname');
   end if;
 
@@ -50,8 +55,10 @@ begin
     'FUCK','FUK','FCK','SHIT','CUNT','DICK','COCK','PISS','TWAT','SLUT',
     'FAG','FAGS','CUM','CUMS','TITS','TIT','ANUS','ARSE','ASS','BOOB',
     'PORN','SEX','SEXY','RAPE','NAZI','KKK','NIGG','NIGA','HOE','HOES',
-    'WANK','JIZZ','BICH','BTCH','PUSY','WTF','STFU'
-  ]) then
+    'WANK','JIZZ','BICH','BTCH','PUSY','WTF','STFU',
+    'BITCH','WHORE','PUSSY','DILDO','PENIS','VAGINA','RAPIST','SLUTS','BOOBS',
+    'DICKS','COCKS','TWATS','WANKER','BASTRD','ASSHOL','NIGGA','NIGGER','HITLER'
+  ]) or v_nick ~ '(FUCK|CUNT|NIGG)' then
     return json_build_object('ok', false, 'error', 'blocked_nickname');
   end if;
 
