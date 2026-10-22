@@ -490,51 +490,165 @@ function drawSparks(dt) {
 }
 
 // ---------- QR code ----------
-let qrCanvas = null;
+// The operator can drag it anywhere, resize it (drag the corner or scroll),
+// and double-click to reset. Its place is remembered on this laptop.
+const QR_KEY = 'lol_qr';
+const QR_PAD = 0.09;                      // white border, as a share of the code size
+const QR_DEFAULT = { cx: null, cy: null, size: 0.15 };   // size = share of screen height
+let qrBox = { ...QR_DEFAULT };
+try { Object.assign(qrBox, JSON.parse(localStorage.getItem(QR_KEY) || '{}')); } catch { /* ignore */ }
+let qrCanvas = null, qrBuiltFor = 0;
+let qrDrag = null, qrHover = null, lastMouse = -10, mouseX = -1, mouseY = -1;
+
 function guestUrl() {
   let url = CONFIG.GUEST_URL || new URL('./', location.href).href;
   if (MODE === 'local' && !url.includes('local')) url += (url.includes('?') ? '&' : '?') + 'local';
   return url;
 }
+
+// Panel rectangle in screen pixels (kept fully on screen).
+function qrRect() {
+  const size = Math.max(H * 0.06, Math.min(H * 0.6, qrBox.size * H));
+  const total = size * (1 + QR_PAD * 2);
+  let cx = qrBox.cx == null ? W - H * 0.035 - total / 2 : qrBox.cx * W;
+  let cy = qrBox.cy == null ? H - H * 0.035 - total / 2 : qrBox.cy * H;
+  cx = Math.max(total / 2, Math.min(W - total / 2, cx));
+  cy = Math.max(total / 2, Math.min(H - total / 2, cy));
+  return { x: cx - total / 2, y: cy - total / 2, w: total, size };
+}
+
+function saveQR() {
+  try { localStorage.setItem(QR_KEY, JSON.stringify(qrBox)); } catch { /* ignore */ }
+}
+
 function buildQR() {
   if (!window.qrcode) { qrCanvas = null; return; }
+  const r = qrRect();
+  const px = Math.round(r.size * DPR);
+  if (qrCanvas && Math.abs(px - qrBuiltFor) < 2) return;
+  qrBuiltFor = px;
   const qr = window.qrcode(0, 'M');
   qr.addData(guestUrl());
   qr.make();
   const n = qr.getModuleCount();
-  const size = Math.round(H * 0.15);
-  const pad = Math.round(size * 0.09);
+  const pad = Math.round(px * QR_PAD);
   const c = document.createElement('canvas');
-  c.width = c.height = size + pad * 2;
+  c.width = c.height = px + pad * 2;
   const g = c.getContext('2d');
-  const r = pad * 1.2;
   g.fillStyle = 'rgba(246,236,214,0.94)';
   g.beginPath();
-  g.roundRect ? g.roundRect(0, 0, c.width, c.height, r) : g.rect(0, 0, c.width, c.height);
+  g.roundRect ? g.roundRect(0, 0, c.width, c.height, pad * 1.2) : g.rect(0, 0, c.width, c.height);
   g.fill();
-  const cell = size / n;
+  // Whole-pixel modules keep the code crisp at any size.
+  const cell = Math.floor(px / n) || 1;
+  const off = pad + Math.floor((px - cell * n) / 2);
   g.fillStyle = '#1b130c';
   for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
-    if (qr.isDark(y, x)) g.fillRect(pad + x * cell, pad + y * cell, Math.ceil(cell), Math.ceil(cell));
+    if (qr.isDark(y, x)) g.fillRect(off + x * cell, off + y * cell, cell, cell);
   }
   qrCanvas = c;
 }
+
 function drawQR(dt) {
   const target = qrVisible && !finale ? 1 : 0;
   qrAlpha += (target - qrAlpha) * Math.min(1, dt * 2);
   if (!qrCanvas || qrAlpha < 0.01) return;
-  const m = H * 0.035;
-  const x = W - qrCanvas.width - m, y = H - qrCanvas.height - m;
+  const r = qrRect();
   ctx.save();
   ctx.globalCompositeOperation = 'lighter';
   ctx.globalAlpha = qrAlpha * (0.18 + 0.05 * Math.sin(now * 1.5));
-  const gs = qrCanvas.width * 2.2;
-  ctx.drawImage(glow, x + qrCanvas.width / 2 - gs / 2, y + qrCanvas.height / 2 - gs / 2, gs, gs);
+  const gs = r.w * 2.2;
+  ctx.drawImage(glow, r.x + r.w / 2 - gs / 2, r.y + r.w / 2 - gs / 2, gs, gs);
   ctx.restore();
   ctx.globalAlpha = qrAlpha;
-  ctx.drawImage(qrCanvas, x, y);
+  ctx.drawImage(qrCanvas, r.x, r.y, r.w, r.w);
   ctx.globalAlpha = 1;
+
+  // Operator-only handles: shown while the mouse is over the QR code.
+  if ((qrHover || qrDrag) && now - lastMouse < 2.5) {
+    const hs = Math.max(12, r.w * 0.08);
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255,226,170,0.9)';
+    ctx.setLineDash([8, 6]);
+    ctx.lineWidth = 2;
+    ctx.strokeRect(r.x - 6, r.y - 6, r.w + 12, r.w + 12);
+    ctx.setLineDash([]);
+    ctx.fillStyle = 'rgba(255,226,170,0.95)';
+    ctx.fillRect(r.x + r.w + 6 - hs, r.y + r.w + 6 - hs, hs, hs);
+    ctx.font = '13px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    const tip = 'Drag to move · drag corner or scroll to resize · double-click to reset';
+    const ty = r.y > 40 ? r.y - 14 : r.y + r.w + 24;
+    const tw = ctx.measureText(tip).width + 16;
+    const tx = Math.max(tw / 2 + 4, Math.min(W - tw / 2 - 4, r.x + r.w / 2));
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    ctx.fillRect(tx - tw / 2, ty - 15, tw, 21);
+    ctx.fillStyle = '#f3e6c8';
+    ctx.fillText(tip, tx, ty);
+    ctx.restore();
+  }
 }
+
+function qrHit(x, y) {
+  if (!qrVisible || finale || qrAlpha < 0.5) return null;
+  const r = qrRect();
+  const hs = Math.max(12, r.w * 0.08) + 8;
+  if (x > r.x + r.w - hs && x < r.x + r.w + 14 && y > r.y + r.w - hs && y < r.y + r.w + 14) return 'resize';
+  if (x > r.x - 6 && x < r.x + r.w + 6 && y > r.y - 6 && y < r.y + r.w + 6) return 'move';
+  return null;
+}
+
+canvas.addEventListener('pointermove', e => {
+  mouseX = e.clientX; mouseY = e.clientY; lastMouse = now;
+  if (qrDrag) {
+    const r = qrRect();
+    if (qrDrag.mode === 'move') {
+      qrBox.cx = (e.clientX - qrDrag.dx) / W;
+      qrBox.cy = (e.clientY - qrDrag.dy) / H;
+    } else {
+      const total = Math.max(e.clientX - r.x, e.clientY - r.y);
+      const cxPx = r.x, cyPx = r.y;           // keep the top-left corner fixed
+      qrBox.size = Math.max(0.06, Math.min(0.6, total / (1 + QR_PAD * 2) / H));
+      const nt = qrBox.size * H * (1 + QR_PAD * 2);
+      qrBox.cx = (cxPx + nt / 2) / W;
+      qrBox.cy = (cyPx + nt / 2) / H;
+      buildQR();
+    }
+    return;
+  }
+  qrHover = qrHit(e.clientX, e.clientY);
+  canvas.style.cursor = qrHover === 'resize' ? 'nwse-resize' : qrHover === 'move' ? 'move' : '';
+});
+canvas.addEventListener('pointerdown', e => {
+  const hit = qrHit(e.clientX, e.clientY);
+  if (!hit) return;
+  const r = qrRect();
+  qrDrag = { mode: hit, dx: e.clientX - (r.x + r.w / 2), dy: e.clientY - (r.y + r.w / 2) };
+  canvas.setPointerCapture(e.pointerId);
+});
+const endQrDrag = () => { if (qrDrag) { qrDrag = null; buildQR(); saveQR(); } };
+canvas.addEventListener('pointerup', endQrDrag);
+canvas.addEventListener('pointercancel', endQrDrag);
+canvas.addEventListener('wheel', e => {
+  if (!qrHit(e.clientX, e.clientY)) return;
+  e.preventDefault();
+  const r = qrRect();
+  const cx = r.x + r.w / 2, cy = r.y + r.w / 2;   // resize around the centre
+  qrBox.size = Math.max(0.06, Math.min(0.6, qrBox.size * Math.exp(-e.deltaY * 0.0015)));
+  qrBox.cx = cx / W; qrBox.cy = cy / H;
+  lastMouse = now;
+  buildQR();
+  clearTimeout(qrSaveTimer);
+  qrSaveTimer = setTimeout(saveQR, 400);
+}, { passive: false });
+let qrSaveTimer;
+canvas.addEventListener('dblclick', e => {
+  if (!qrHit(e.clientX, e.clientY)) return;
+  qrBox = { ...QR_DEFAULT };
+  qrBuiltFor = 0;
+  buildQR();
+  saveQR();
+});
 
 // ---------- Operator overlay (only shown when H is pressed) ----------
 function drawOperator() {
@@ -767,7 +881,7 @@ let cursorTimer;
 window.addEventListener('mousemove', () => {
   document.body.classList.remove('nocursor');
   clearTimeout(cursorTimer);
-  cursorTimer = setTimeout(() => document.body.classList.add('nocursor'), 2500);
+  cursorTimer = setTimeout(() => { document.body.classList.add('nocursor'); canvas.style.cursor = ''; }, 2500);
 });
 
 window.addEventListener('resize', resize);

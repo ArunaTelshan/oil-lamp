@@ -100,6 +100,7 @@ A phone normally lights only one lamp. For testing, tap the **moon** on the phon
 | `F` | Fullscreen on/off |
 | `M` | Mute/unmute |
 | `Q` | Show/hide the QR code |
+| Mouse | **Drag the QR code** to move it, drag its corner (or scroll over it) to resize, double-click it to reset. Its place is remembered on this laptop |
 | `H` | Operator panel (lamp count, mode, guest link). Press again to hide |
 | `Shift+R` | Replay the WELCOME finale (only after all 140 are lit) |
 | `Space` / `D` | Demo mode only: add a lamp / pause or resume |
