@@ -18,6 +18,7 @@ const glow = makeGlow(128, GLOW_WARM);
 const ember = makeGlow(64, [[0, 'rgba(255,250,220,1)'], [0.25, 'rgba(255,200,110,0.7)'], [1, 'rgba(255,120,30,0)']]);
 
 const KEEP = 'lol_keepsake';
+const debugEl = document.getElementById('debug');
 const MODE = backendMode();
 if (MODE !== 'supabase') document.getElementById('localNote').hidden = false;
 
@@ -93,37 +94,87 @@ continueBtn.addEventListener('click', () => {
 });
 
 // ---------- Motion (shake the flame) ----------
-let motionOn = false;
+// Uses the plain accelerometer (every phone has one) and removes gravity
+// ourselves, so it also works on phones without a gyroscope.
+let motionOn = false;       // listeners attached
+let motionLive = false;     // sensor events are actually arriving
+let motionEvents = 0;
+let motionDenied = false;
+let gSign = /iPhone|iPad|iPod/.test(navigator.userAgent) ? -1 : 1;
+const grav = { x: 0, y: 0, z: 0, init: false };
+const hp = { x: 0, y: 0, z: 0 };
+let shakeKick = 0;          // quick sideways push from a shake
+const DEBUG = new URLSearchParams(location.search).has('debug');
+const needsPermission = () => {
+  const DO = window.DeviceOrientationEvent, DM = window.DeviceMotionEvent;
+  return (DM && typeof DM.requestPermission === 'function') || (DO && typeof DO.requestPermission === 'function');
+};
+
+function onMotion(e) {
+  let x, y, z;
+  const g = e.accelerationIncludingGravity;
+  if (g && g.x != null) {
+    if (!grav.init) { grav.x = g.x; grav.y = g.y; grav.z = g.z; grav.init = true; }
+    grav.x += (g.x - grav.x) * 0.08;
+    grav.y += (g.y - grav.y) * 0.08;
+    grav.z += (g.z - grav.z) * 0.08;
+    x = g.x - grav.x; y = g.y - grav.y; z = g.z - grav.z;
+    // iPhones report gravity with the opposite sign; learn it from how
+    // the phone is held (upright = gravity mostly along y).
+    if (Math.abs(grav.y) > 4) gSign = grav.y > 0 ? 1 : -1;
+    // Keep the flame pointing "up" in the real world as the phone tilts.
+    leanTarget = Math.max(-0.75, Math.min(0.75, (gSign * grav.x) / 9.8 * 0.95));
+  } else if (e.acceleration && e.acceleration.x != null) {
+    x = e.acceleration.x; y = e.acceleration.y || 0; z = e.acceleration.z || 0;
+  } else return;
+  hp.x = x; hp.y = y; hp.z = z;
+  motionEvents++;
+  if (!motionLive) { motionLive = true; updateShakeHint(); }
+  const mag = Math.hypot(x, y, z);
+  if (mag < 0.3) return;    // sensor noise
+  // Even a gentle shake should clearly move the flame.
+  leanV += -x * 0.1;
+  shakeKick = Math.max(-0.7, Math.min(0.7, shakeKick - x * 0.035));
+  flutter = Math.min(1.5, flutter + mag * 0.035);
+  if (mag > 6 && now - lastShakeSpark > 0.14 && flameK > 0.5) {
+    lastShakeSpark = now;
+    burst(2 + Math.min(10, Math.floor(mag / 3)));
+    if (mag > 12 && navigator.vibrate) navigator.vibrate(8);
+  }
+}
+
+function attachMotion() {
+  if (motionOn) return;
+  motionOn = true;
+  window.addEventListener('devicemotion', onMotion);
+  // If nothing arrives (e.g. a laptop), suggest using a finger instead.
+  setTimeout(updateShakeHint, 2000);
+}
+
+// iPhones must ask permission from a tap (click). Android needs no prompt.
+let motionAsking = false;
 function enableMotion() {
-  const attach = () => {
-    if (motionOn) return;
-    motionOn = true;
-    window.addEventListener('deviceorientation', e => {
-      if (e.gamma == null) return;
-      // Keep the flame pointing "up" in the real world as the phone tilts.
-      leanTarget = Math.max(-0.75, Math.min(0.75, -e.gamma / 70));
-    });
-    window.addEventListener('devicemotion', e => {
-      const a = e.acceleration && e.acceleration.x != null ? e.acceleration : null;
-      if (!a) return;
-      const ax = a.x || 0, ay = a.y || 0, az = a.z || 0;
-      leanV += -ax * 0.06;
-      const mag = Math.hypot(ax, ay, az);
-      flutter = Math.min(1.2, flutter + mag * 0.012);
-      if (mag > 13 && now - lastShakeSpark > 0.12 && flameK > 0.5) {
-        lastShakeSpark = now;
-        burst(4 + Math.floor(mag / 6));
-        if (navigator.vibrate) navigator.vibrate(8);
-      }
-    });
-  };
+  if (motionOn || motionAsking) return;
+  if (!needsPermission()) { attachMotion(); return; }
   const DO = window.DeviceOrientationEvent, DM = window.DeviceMotionEvent;
   const asks = [];
-  if (DO && typeof DO.requestPermission === 'function') asks.push(DO.requestPermission().catch(() => 'denied'));
   if (DM && typeof DM.requestPermission === 'function') asks.push(DM.requestPermission().catch(() => 'denied'));
-  if (asks.length) Promise.all(asks).then(r => { if (r.includes('granted')) attach(); });
-  else attach();
+  if (DO && typeof DO.requestPermission === 'function') asks.push(DO.requestPermission().catch(() => 'denied'));
+  motionAsking = true;
+  Promise.all(asks).then(r => {
+    motionAsking = false;
+    if (r.includes('granted')) attachMotion();
+    else { motionDenied = true; updateShakeHint(); }
+  });
 }
+
+const shakeHint = document.getElementById('shakeHint');
+function updateShakeHint() {
+  if (motionLive) shakeHint.textContent = 'Gently shake your phone ✦';
+  else if (needsPermission() && !motionOn && !motionDenied) shakeHint.textContent = 'Tap here, then gently shake your phone ✦';
+  else shakeHint.textContent = 'Touch and drag near your flame ✦';
+}
+shakeHint.addEventListener('click', () => enableMotion());
 
 // ---------- Little sounds on the phone ----------
 function initAudio() {
@@ -318,6 +369,7 @@ function frame() {
   lean += leanV * dt;
   lean = Math.max(-1.1, Math.min(1.1, lean));
   flutter = Math.max(0, flutter - dt * 1.4);
+  shakeKick *= Math.exp(-dt * 5);
 
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
   ctx.clearRect(0, 0, W, H);
@@ -393,7 +445,7 @@ function frame() {
   // Flame
   if (flameK > 0) {
     const flick = 1 + 0.07 * wobble(now, 3) + 0.03 * Math.sin(now * 29);
-    const fl = flutter * (0.18 * Math.sin(now * 23) + 0.1 * Math.sin(now * 37));
+    const fl = flutter * (0.22 * Math.sin(now * 23) + 0.12 * Math.sin(now * 37)) + shakeKick;
     const fh = s * 1.0 * flameK * flick * (1 + flare * 0.5) * (1 - Math.min(0.35, Math.abs(lean) * 0.25));
     drawFlame(ctx, w.x, w.y, fh, lean * 0.9 + fl + 0.05 * wobble(now * 0.6, 7), 1);
   }
@@ -413,6 +465,14 @@ function frame() {
   ctx.restore();
 
   if (step === 'done') drawMap((Math.sin(now * 2.4) + 1) / 2);
+  if (DEBUG && Math.floor(now * 5) !== Math.floor((now - dt) * 5)) {
+    const f = v => (v >= 0 ? ' ' : '') + v.toFixed(2);
+    debugEl.textContent =
+      `permission API: ${needsPermission() ? 'yes (iPhone)' : 'no'}  listening: ${motionOn}  denied: ${motionDenied}\n` +
+      `events: ${motionEvents}  shake: ${f(hp.x)} ${f(hp.y)} ${f(hp.z)}\n` +
+      `gravity: ${f(grav.x)} ${f(grav.y)} ${f(grav.z)}  sign: ${gSign}\n` +
+      `lean: ${f(lean)}  flutter: ${f(flutter)}`;
+  }
 
   requestAnimationFrame(frame);
 }
@@ -420,6 +480,8 @@ function frame() {
 // ---------- Start ----------
 function init() {
   resize();
+  if (!needsPermission()) attachMotion();
+  else updateShakeHint();
   let keep = null;
   try { keep = JSON.parse(localStorage.getItem(KEEP) || 'null'); } catch { /* ignore */ }
   if (keep && keep.lamp) {
@@ -427,8 +489,8 @@ function init() {
     flameK = 1;
     showKeepsake(keep);
     fly = null;
-    // Re-enable shake on the first tap (iPhones need a tap to allow motion).
-    window.addEventListener('pointerdown', () => enableMotion(), { once: true });
+    // iPhones only allow motion after a tap: ask on the first tap anywhere.
+    if (needsPermission()) window.addEventListener('click', () => enableMotion(), { once: true });
   } else {
     setStep('name');
     renderCells();

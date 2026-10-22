@@ -250,7 +250,24 @@ h2 {
 .k-meta { font-size: 17px; color: var(--muted); margin: 2px 0 10px; font-style: italic; }
 #map { width: 100%; height: 92px; display: block; border-radius: 10px; }
 .k-find { margin: 8px 0 0; font-size: 16px; color: var(--text); opacity: 0.85; }
-.shake-hint { margin: 12px 0 0; font-size: 15px; font-style: italic; color: var(--muted); opacity: 0.8; }
+.shake-hint {
+  display: block;
+  margin: 10px auto 0;
+  padding: 6px 10px;
+  border: 0;
+  background: none;
+  font: italic 15px 'Cormorant Garamond', Georgia, serif;
+  color: var(--muted);
+  opacity: 0.85;
+  cursor: pointer;
+}
+.debug {
+  position: fixed; left: 6px; top: 6px; z-index: 5;
+  margin: 0; padding: 0;
+  font: 11px/1.35 ui-monospace, Menlo, monospace; color: #9f9;
+  white-space: pre; pointer-events: none;
+}
+.debug:empty { display: none; }
 
 .local-note {
   position: fixed; left: 8px; bottom: 6px;

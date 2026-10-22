@@ -38,7 +38,8 @@ The QR code on the big screen is generated automatically and points to the guest
    - swipe up,
    - see its lamp arrive on the screen with the nickname.
 
-   Try shaking each phone on the keepsake card: the flame should sway.
+   Try shaking each phone on the keepsake card: the flame should sway. On iPhone, the phone asks for "Motion & Orientation" access. Tap **Allow**. If the card says "Tap here, then gently shake", tap that line first.
+   If shaking does nothing on a phone, open `https://arunatelshan.github.io/oil-lamp/?debug` on it. Green text at the top shows whether motion readings arrive.
 4. **Burst test (optional):** open `https://arunatelshan.github.io/oil-lamp/tools/simulate.html` on the laptop. It fires 140 fake guests at the live database and reports whether every lamp number was unique.
    - Watch the screen do the full WELCOME finale.
    - Then **reset** (step 1) and reload the screen.
