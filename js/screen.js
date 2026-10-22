@@ -43,6 +43,7 @@ let finale = null;         // { t0, at } once triggered
 let formed = false;
 let qrVisible = true, qrAlpha = 0;
 let connectionOk = true;
+let lastLampCheck = 0;      // when the screen last heard from the database
 let started = false;
 let showHelp = false;
 let now = 0;
@@ -510,7 +511,7 @@ function drawOperator() {
   const lines = [
     `Lamps lit: ${litCount} / ${N}   ·   waiting: ${pending.length}   ·   mode: ${MODE}   ·   ${fpsShown} fps`,
     `Guest link: ${guestUrl()}`,
-    `Phone shakes: ${shakeStatus}`,
+    `Phone shakes: ${shakeStatus}   ·   last lamp check: ${lastLampCheck ? Math.round(now - lastLampCheck) + 's ago' : '—'}${frameErrors ? `   ·   frame errors: ${frameErrors}` : ''}`,
     'F fullscreen · M mute · Q show/hide QR · H hide this panel',
     MODE === 'demo' ? 'Space add a lamp · D pause/resume demo' : '',
     'Shift+R replay finale (after all lamps are lit)',
@@ -527,7 +528,13 @@ function drawOperator() {
 
 // ---------- Main loop ----------
 let lastT = performance.now() / 1000;
+// The frame loop never stops, even if one frame hits an unexpected error.
+let frameErrors = 0;
 function frame() {
+  try { frameBody(); } catch (e) { frameErrors++; console.error(e); }
+  requestAnimationFrame(frame);
+}
+function frameBody() {
   const t = performance.now() / 1000;
   const dt = Math.min(0.05, t - lastT);
   lastT = t; now = t;
@@ -617,8 +624,6 @@ function frame() {
   scene.drawFront(ctx, now);
   drawQR(dt);
   drawOperator();
-
-  requestAnimationFrame(frame);
 }
 
 // ---------- Demo mode (offline backup / rehearsal) ----------
@@ -689,12 +694,12 @@ document.getElementById('mode').textContent = modeNote;
 (document.fonts ? document.fonts.load('600 40px Cinzel').catch(() => {}) : Promise.resolve()).finally(() => {
   resize();
   if (MODE !== 'demo') {
-    watchLamps({
+    const watcher = watchLamps({
       onLamps: addLamps,
-      onStatus: ok => { connectionOk = ok; },
+      onStatus: ok => { connectionOk = ok; if (ok) lastLampCheck = performance.now() / 1000; },
       onReset: () => location.reload(),
     });
-    watchShakes({ onShake, onStatus: st => { shakeStatus = st; } });
+    watchShakes({ onShake, onLit: () => watcher.kick(), onStatus: st => { shakeStatus = st; } });
   }
   requestAnimationFrame(frame);
 });

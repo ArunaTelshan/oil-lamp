@@ -2,7 +2,7 @@
 import { CONFIG } from './config.js';
 import { makeSlots, makeOrder, HORIZON } from './layout.js';
 import { makeGlow, GLOW_WARM, wobble, drawFlame, drawLampBody, wickPos } from './lamp-art.js';
-import { backendMode, cleanNickname, isBlocked, lightLampWithRetry, sendShake, shakeStats } from './backend.js';
+import { backendMode, cleanNickname, isBlocked, lightLampWithRetry, sendShake, shakeStats, notifyLit } from './backend.js';
 
 const N = CONFIG.TOTAL_LAMPS;
 const app = document.getElementById('app');
@@ -256,6 +256,7 @@ async function release(isRetry = false) {
   }
   await minAnim;
   if (result.ok) {
+    notifyLit(result.lamp);
     const keep = { lamp: result.lamp, nickname: result.nickname, time: Date.now() };
     try { localStorage.setItem(KEEP, JSON.stringify(keep)); } catch { /* ignore */ }
     showKeepsake(keep);

@@ -88,7 +88,9 @@ A phone normally lights only one lamp. For testing, tap the **moon** on the phon
 | `Shift+R` | Replay the WELCOME finale (only after all 140 are lit) |
 | `Space` / `D` | Demo mode only: add a lamp / pause or resume |
 
-A small red dot in the top-left corner means the screen has lost its connection. It keeps retrying by itself, and nothing is lost: the database holds every lamp. If the screen is reloaded mid-ceremony, all lamps already lit reappear in their places.
+**Laptop settings for the night:** turn off sleep and the screensaver, and keep the screen page as the visible tab. Browsers pause pages that are hidden or minimised.
+
+The operator panel (`H`) shows "last lamp check: Ns ago". It should stay at 0–1s. A small red dot in the top-left corner means the screen has lost its connection. It keeps retrying by itself, and nothing is lost: the database holds every lamp. If the screen is reloaded mid-ceremony, all lamps already lit reappear in their places.
 
 ---
 
@@ -99,7 +101,9 @@ A small red dot in the top-left corner means the screen has lost its connection.
   - It refuses taps after 140, and returns the same lamp if the same phone asks twice.
   - Tested with 200 simultaneous taps: exactly 140 unique lamps, and the rest were told "full".
 - **Shakes:** phones send tiny messages through Supabase Realtime (at most 2 per second per phone, only while shaking), and the screen listens on a live connection. This doesn't touch the database.
-- **Screen updates:** the screen checks for new lamps every second. If several lamps arrive at once, they float in one after another so every guest gets a moment.
+- **Screen updates:** the screen checks for new lamps every second, and the phone also sends an instant "lamp lit" nudge so the lamp usually arrives in under a second.
+  - Each check gives up after 6 seconds if the connection stalls, and a watchdog restarts checking if it ever stops.
+  - Earlier, one stalled request could stop new lamps appearing until a refresh. If several lamps arrive at once, they float in one after another so every guest gets a moment.
 - **Lamp positions:** the 140 spots and their order are fixed (`LAYOUT_SEED` in `js/config.js`), so the phone's mini map shows each guest where their lamp floats.
 - **Drawing:** everything is drawn in code on a canvas, with no images. The scene adapts to any screen shape and is designed for the 8×6 (4:3) screen.
 - **Sound:** all sound is generated live in the browser, so there are no audio files.

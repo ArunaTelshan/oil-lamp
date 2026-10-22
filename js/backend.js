@@ -44,6 +44,20 @@ export function isBlocked(nick) {
   return CONFIG.BLOCKED.includes(nick);
 }
 
+// fetch + read JSON, giving up after `ms` (a stalled mobile connection can
+// otherwise hang a request forever).
+async function getJSON(url, opts = {}, ms = 6000) {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), ms);
+  try {
+    const res = await fetch(url, { ...opts, signal: ctl.signal });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.json();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // ---------- Guest: light a lamp ----------
 // Returns { ok, lamp, nickname, repeat, total } or { ok:false, error }.
 // Network failures throw, so the caller can retry.
@@ -51,13 +65,12 @@ export function isBlocked(nick) {
 export async function lightLamp(nickname, device = deviceId()) {
   const mode = backendMode();
   if (mode === 'local' || mode === 'demo') return localLight(nickname, device);
-  const res = await fetch(`${CONFIG.SUPABASE_URL}/rest/v1/rpc/light_lamp`, {
+  // Safe to retry: the same phone asking again just gets its lamp back.
+  return getJSON(`${CONFIG.SUPABASE_URL}/rest/v1/rpc/light_lamp`, {
     method: 'POST',
     headers: headers(),
     body: JSON.stringify({ p_nickname: nickname, p_device: device }),
-  });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.json();
+  }, 10000);
 }
 
 // Retries network errors with back-off (~40 s in total).
@@ -85,40 +98,56 @@ export async function lightLampWithRetry(nickname, onRetry) {
 export function watchLamps({ onLamps, onStatus, onReset }) {
   const mode = backendMode();
   if (mode === 'local') return watchLocal({ onLamps, onReset });
-  if (mode === 'demo') return { stop() {} }; // screen drives demo itself
-  let last = 0;
-  let stopped = false;
-  let fails = 0;
-  let polls = 0;
+  if (mode === 'demo') return { stop() {}, kick() {} }; // screen drives demo itself
+  const base = `${CONFIG.SUPABASE_URL}/rest/v1/lamps`;
+  const opts = { headers: headers(), cache: 'no-store' };
+  let last = 0, lastCreated = null;
+  let stopped = false, busy = false, timer = null;
+  let fails = 0, polls = 0, lastStart = Date.now();
+
+  const kick = (ms = 0) => { clearTimeout(timer); if (!stopped) timer = setTimeout(poll, ms); };
+
   async function poll() {
-    if (stopped) return;
+    if (stopped || busy) return;
+    busy = true;
+    lastStart = Date.now();
     try {
-      const url = `${CONFIG.SUPABASE_URL}/rest/v1/lamps?select=id,nickname&id=gt.${last}&order=id.asc`;
-      const res = await fetch(url, { headers: headers(), cache: 'no-store' });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const rows = await res.json();
+      const rows = await getJSON(`${base}?select=id,nickname,created_at&id=gt.${last}&order=id.asc`, opts);
       const initial = polls === 0;
-      if (rows.length) last = rows[rows.length - 1].id;
-      if (rows.length || initial) onLamps(rows, initial);
-      // Every ~10 polls, check whether the table was reset.
-      if (++polls % 10 === 0 && last > 0) {
-        const r2 = await fetch(`${CONFIG.SUPABASE_URL}/rest/v1/lamps?select=id&order=id.desc&limit=1`,
-          { headers: headers(), cache: 'no-store' });
-        if (r2.ok) {
-          const top = await r2.json();
-          if (!top.length || top[0].id < last) { onReset && onReset(); return; }
-        }
+      polls++;
+      if (rows.length) {
+        last = rows[rows.length - 1].id;
+        lastCreated = rows[rows.length - 1].created_at;
+      }
+      if (rows.length || initial) {
+        try { onLamps(rows, initial); } catch (e) { console.error(e); }
+      }
+      // Every ~10 checks: is our newest lamp still the same row? If not, the
+      // ceremony was reset (even if new lamps have since reached the same number).
+      if (polls % 10 === 0 && last > 0) {
+        const chk = await getJSON(`${base}?select=created_at&id=eq.${last}`, opts);
+        if (!chk.length || chk[0].created_at !== lastCreated) { onReset && onReset(); return; }
       }
       fails = 0;
       onStatus && onStatus(true);
     } catch {
       fails++;
       if (fails >= 3) onStatus && onStatus(false);
+    } finally {
+      busy = false;
     }
-    setTimeout(poll, CONFIG.POLL_MS);
+    kick(CONFIG.POLL_MS);
   }
-  poll();
-  return { stop() { stopped = true; } };
+
+  // Watchdog: if checking has stopped for any reason, start it again.
+  setInterval(() => {
+    if (Date.now() - lastStart > 10000) { busy = false; kick(0); }
+  }, 4000);
+  // Check right away when the screen tab becomes visible again.
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) kick(0); });
+
+  kick(0);
+  return { stop() { stopped = true; clearTimeout(timer); }, kick: () => { if (!busy) kick(0); } };
 }
 
 // ---------- Local stand-in (same browser, for testing) ----------
@@ -181,8 +210,19 @@ export function sendShake(lamp, power) {
   }).finally(() => { shakeBusy = false; });
 }
 
-// onShake({l, p}); onStatus(text) for the operator panel.
-export function watchShakes({ onShake, onStatus }) {
+// Tell the screen right away that a lamp was lit (it then checks immediately).
+export function notifyLit(lamp) {
+  if (backendMode() !== 'supabase') return; // local mode already notifies
+  fetch(`${CONFIG.SUPABASE_URL}/realtime/v1/api/broadcast`, {
+    method: 'POST',
+    headers: headers(),
+    body: JSON.stringify({ messages: [{ topic: SHAKE_TOPIC, event: 'lit', payload: { l: lamp }, private: false }] }),
+    keepalive: true,
+  }).catch(() => { /* polling still picks it up */ });
+}
+
+// onShake({l, p}); onLit({l}); onStatus(text) for the operator panel.
+export function watchShakes({ onShake, onLit, onStatus }) {
   const mode = backendMode();
   if (mode === 'local') {
     channel && channel.addEventListener('message', e => {
@@ -216,6 +256,8 @@ export function watchShakes({ onShake, onStatus }) {
         else onStatus && onStatus(`refused: ${JSON.stringify(m.payload.response || {}).slice(0, 80)}`);
       } else if (m.event === 'broadcast' && m.payload && m.payload.event === 'shake') {
         onShake(m.payload.payload || {});
+      } else if (m.event === 'broadcast' && m.payload && m.payload.event === 'lit') {
+        onLit && onLit(m.payload.payload || {});
       } else if (m.topic === topic && (m.event === 'phx_error' || m.event === 'phx_close')) {
         try { ws.close(); } catch { /* ignore */ }
       }
