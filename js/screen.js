@@ -18,7 +18,6 @@ const scene = new Scene(CONFIG.SCENE_SEED);
 const audio = new LakeAudio();
 scene.hw.onEvent = (name, arg) => {
   if (name === 'splash') audio.splash();
-  else if (name === 'cackle') audio.cackle(arg);
   else if (name === 'rattle') audio.rattle();
   else if (name === 'rise') audio.rumble();
 };

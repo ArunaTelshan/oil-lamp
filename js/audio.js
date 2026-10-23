@@ -348,63 +348,6 @@ export class LakeAudio {
     }
   }
 
-  // A witch's cackle: shrill, raspy "ha-ha-ha-haaa" bursts falling in pitch,
-  // shaped by "ah" vowel formants, with breath noise on each syllable.
-  cackle(pan = 0) {
-    if (!this.ctx || this.muted) return;
-    const ctx = this.ctx, t0 = ctx.currentTime + 0.05;
-    const out = ctx.createGain();
-    out.gain.value = 0.5;
-    const p = ctx.createStereoPanner(); p.pan.value = pan;
-    const shaper = ctx.createWaveShaper();                 // a little rasp
-    const curve = new Float32Array(256);
-    for (let i = 0; i < 256; i++) { const x = i / 128 - 1; curve[i] = Math.tanh(x * 2.6); }
-    shaper.curve = curve;
-    shaper.connect(out).connect(p);
-    p.connect(this.master); p.connect(this.reverb);
-    const formants = [[850, 6, 1], [1250, 7, 0.6], [2700, 9, 0.35]];
-    const noise = this.noiseBuffer(0.2);
-    const n = 9;
-    let s = t0;
-    for (let i = 0; i < n; i++) {
-      const last = i === n - 1;
-      const dur = last ? 0.75 : 0.085 + Math.random() * 0.02;
-      const f0 = (640 - i * 22) * (0.97 + Math.random() * 0.06);
-      const o = ctx.createOscillator();
-      o.type = 'sawtooth';
-      o.frequency.setValueAtTime(f0 * 1.15, s);
-      o.frequency.exponentialRampToValueAtTime(f0 * (last ? 0.62 : 0.85), s + dur);
-      const lfo = ctx.createOscillator();                  // wobbly old voice
-      lfo.frequency.value = last ? 7 : 24;
-      const lg = ctx.createGain(); lg.gain.value = f0 * (last ? 0.05 : 0.025);
-      lfo.connect(lg).connect(o.frequency);
-      const env = ctx.createGain();
-      env.gain.setValueAtTime(0.0001, s);
-      env.gain.exponentialRampToValueAtTime(last ? 0.5 : 0.6, s + 0.018);
-      if (last) env.gain.setValueAtTime(0.5, s + 0.3);
-      env.gain.exponentialRampToValueAtTime(0.0001, s + dur);
-      for (const [f, q, v] of formants) {
-        const bp = ctx.createBiquadFilter();
-        bp.type = 'bandpass'; bp.frequency.value = f; bp.Q.value = q;
-        const fg = ctx.createGain(); fg.gain.value = v;
-        o.connect(bp).connect(fg).connect(env);
-      }
-      env.connect(shaper);
-      // breathy "h" at the start of each syllable
-      const h = ctx.createBufferSource(); h.buffer = noise;
-      const hb = ctx.createBiquadFilter(); hb.type = 'bandpass'; hb.frequency.value = 2200; hb.Q.value = 1.2;
-      const hg = ctx.createGain();
-      hg.gain.setValueAtTime(0.0001, s - 0.03);
-      hg.gain.exponentialRampToValueAtTime(0.25, s);
-      hg.gain.exponentialRampToValueAtTime(0.0001, s + 0.05);
-      h.connect(hb).connect(hg).connect(out);
-      h.start(s - 0.03); h.stop(s + 0.08);
-      o.start(s); o.stop(s + dur + 0.02);
-      lfo.start(s); lfo.stop(s + dur + 0.02);
-      s += dur + 0.04 + (i > 5 ? (i - 5) * 0.015 : 0);
-    }
-  }
-
   toggleMute() {
     this.muted = !this.muted;
     if (this.master) this.master.gain.setTargetAtTime(this.muted ? 0 : 0.9, this.ctx.currentTime, 0.1);
