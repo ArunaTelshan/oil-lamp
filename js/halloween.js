@@ -832,7 +832,7 @@ export class Halloween {
     this.W = W; this.H = H; this.hy = hy; this.moon = moon; this.shoreY = shoreY;
     this.left = renderTree(W, H, 'left', this.seed * 3 + 1, moon);
     this.right = renderTree(W, H, 'right', this.seed * 7 + 2, moon);
-    this.treeSpiderSize = 0.011 + Math.random() * 0.02;     // the resident spider: a new size each load
+    this.treeSpiderSize = 0.011 + Math.random() * 0.01;     // the resident spider: a new size each load
     this.perches = [
       ...this.left.perches.map(p => ({ ...p, tree: 'left' })),
       ...this.right.perches.map(p => ({ ...p, tree: 'right' })),
@@ -901,13 +901,13 @@ export class Halloween {
     this.rbank = { canvas: rb, x: rx0, y: ry };
 
     this.pumpkins = [
-      { x: W * 0.012, y: H * 0.878, ...renderPumpkin(H * 0.04, 2, 2) },
       { x: W * 0.045, y: H * 0.905, ...renderPumpkin(H * 0.045, 1, 3) },
       { x: W * 0.105, y: H * 0.952, ...renderPumpkin(H * 0.085, 0, 5) },
       { x: W * 0.19, y: H * 0.978, ...renderPumpkin(H * 0.056, 2, 8) },
-      { x: W * 0.238, y: H * 0.997, ...renderPumpkin(H * 0.036, 1, 9) },
-      // right side: one big lantern is enough
-      { x: W * 0.755, y: H * 0.985, ...renderPumpkin(H * 0.07, 0, 13) },
+      // right side
+      { x: W * 0.7, y: H * 0.995, ...renderPumpkin(H * 0.046, 2, 11) },
+      { x: W * 0.765, y: H * 0.982, ...renderPumpkin(H * 0.07, 0, 13) },
+      { x: W * 0.818, y: H * 0.962, ...renderPumpkin(H * 0.036, 1, 17) },
     ].map((p, i) => ({ ...p, seed: i * 7.3 }));
 
     this.web = this.renderWeb(W, H);
@@ -1025,12 +1025,12 @@ export class Halloween {
   // ---------- Skeleton ----------
   spawnSpider() {
     const { W, H } = this;
-    // Sizes vary: tiny, medium or a big hairy one (never two of the same kind at once).
+    // Sizes vary: small or medium (two at once are always different sizes).
     const used = this.spiders.map(o => o.size);
-    const kinds = ['small', 'medium', 'big'].filter(k => !used.includes(k));
+    const kinds = ['small', 'medium'].filter(k => !used.includes(k));
     const size = kinds[Math.floor(Math.random() * kinds.length)] || 'medium';
-    const s = H * (size === 'small' ? 0.008 + Math.random() * 0.005 : size === 'medium' ? 0.015 + Math.random() * 0.007 : 0.028 + Math.random() * 0.012);
-    const sp = { t: 0, down: 5 + Math.random() * 3, pause: 4 + Math.random() * 5, up: 5, len: H * (0.1 + Math.random() * 0.2) * (size === 'big' ? 1.2 : 1), s, size, ph: Math.random() * 6 };
+    const s = H * (size === 'small' ? 0.008 + Math.random() * 0.005 : 0.015 + Math.random() * 0.007);
+    const sp = { t: 0, down: 5 + Math.random() * 3, pause: 4 + Math.random() * 5, up: 5, len: H * (0.1 + Math.random() * 0.2), s, size, ph: Math.random() * 6 };
     // Hang from a high branch point of a foreground tree, or from the top edge.
     const cands = [];
     for (const [tree, side] of [[this.left, 'left'], [this.right, 'right']]) {
