@@ -305,10 +305,12 @@ function renderPumpkin(size, style, seed) {
 }
 
 // ---------- Characters ----------
-function drawWitch(ctx, x, y, s, t) {
+// look (0..1): how far she has turned her head to stare at the audience.
+// face(ctx, s): draws her front-facing head, centred on the neck.
+function drawWitch(ctx, x, y, s, t, look = 0, flip = false, face = null) {
   ctx.save();
   ctx.translate(x, y);
-  ctx.rotate(-0.06 + Math.sin(t * 2.1) * 0.05);
+  ctx.rotate((-0.06 + Math.sin(t * 2.1) * 0.05) * (1 - look * 0.8));
   ctx.fillStyle = SIL;
   ctx.strokeStyle = SIL;
   ctx.lineCap = 'round';
@@ -346,17 +348,21 @@ function drawWitch(ctx, x, y, s, t) {
   // Legs and pointy boots
   ctx.lineWidth = s * 0.06;
   ctx.beginPath(); ctx.moveTo(s * 0.12, -s * 0.02); ctx.lineTo(s * 0.22, s * 0.28); ctx.lineTo(s * 0.4, s * 0.26); ctx.stroke();
-  // Head with a long nose
-  ctx.beginPath(); ctx.arc(s * 0.2, -s * 0.7, s * 0.12, 0, Math.PI * 2); ctx.fill();
-  ctx.beginPath(); ctx.moveTo(s * 0.3, -s * 0.72); ctx.lineTo(s * 0.44, -s * 0.66); ctx.lineTo(s * 0.3, -s * 0.66); ctx.fill();
-  // Hat
-  ctx.beginPath(); ctx.ellipse(s * 0.18, -s * 0.8, s * 0.26, s * 0.05, -0.15, 0, Math.PI * 2); ctx.fill();
-  ctx.beginPath();
-  ctx.moveTo(s * 0.04, -s * 0.8);
-  ctx.quadraticCurveTo(s * 0.14, -s * 1.15, -s * 0.12, -s * (1.32 + flap * 0.03));
-  ctx.quadraticCurveTo(s * 0.26, -s * 1.08, s * 0.32, -s * 0.82);
-  ctx.closePath();
-  ctx.fill();
+  // Head with a long nose, and the hat (in profile; fades as she turns)
+  const prof = 1 - clamp01(look * 2.2);
+  if (prof > 0) {
+    ctx.globalAlpha = prof;
+    ctx.beginPath(); ctx.arc(s * 0.2, -s * 0.7, s * 0.12, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(s * 0.3, -s * 0.72); ctx.lineTo(s * 0.44, -s * 0.66); ctx.lineTo(s * 0.3, -s * 0.66); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(s * 0.18, -s * 0.8, s * 0.26, s * 0.05, -0.15, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(s * 0.04, -s * 0.8);
+    ctx.quadraticCurveTo(s * 0.14, -s * 1.15, -s * 0.12, -s * (1.32 + flap * 0.03));
+    ctx.quadraticCurveTo(s * 0.26, -s * 1.08, s * 0.32, -s * 0.82);
+    ctx.closePath();
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  }
   // Hair streaming back
   ctx.lineWidth = s * 0.025;
   for (let i = 0; i < 4; i++) {
@@ -372,7 +378,277 @@ function drawWitch(ctx, x, y, s, t) {
   ctx.beginPath(); ctx.moveTo(-s * 0.47, -s * 0.23); ctx.lineTo(-s * 0.44, -s * 0.31); ctx.lineTo(-s * 0.42, -s * 0.21); ctx.fill();
   ctx.lineWidth = s * 0.03;
   ctx.beginPath(); ctx.moveTo(-s * 0.74, -s * 0.06); ctx.quadraticCurveTo(-s * 0.9, -s * (0.25 + flap * 0.05), -s * 0.8, -s * 0.32); ctx.stroke();
+  // Front-facing head, drawn un-mirrored so the face always reads the same way
+  if (look > 0 && face) {
+    ctx.save();
+    ctx.translate(s * 0.19, -s * 0.66);
+    if (flip) ctx.scale(-1, 1);
+    face(ctx, s);
+    ctx.restore();
+  }
   ctx.restore();
+}
+
+// The witch's face, seen from the front, pre-rendered once (she turns her
+// head to stare at the audience). Canvas units: head centre at FACE.cx/cy,
+// half the face width = FACE.hw. Eyes are left empty: they glow live.
+const FACE = { w: 340, h: 520, cx: 170, cy: 300, hw: 76, eyes: [[138, 288], [202, 288]] };
+function renderWitchFace() {
+  const c = document.createElement('canvas');
+  c.width = FACE.w; c.height = FACE.h;
+  const g = c.getContext('2d');
+  const { cx } = FACE;
+  const canBlur = 'filter' in g;
+  const blur = px => { if (canBlur) g.filter = px ? `blur(${px}px)` : 'none'; };
+  const r = rng(1031);
+  g.lineCap = 'round';
+  g.lineJoin = 'round';
+
+  // Long stringy hair behind the face, a few strands caught by the moon.
+  for (let i = 0; i < 60; i++) {
+    const side = i % 2 ? 1 : -1;
+    const x0 = cx + side * (30 + r() * 45), y0 = 205 + r() * 30;
+    const x1 = cx + side * (78 + r() * 40), y1 = 320 + r() * 50;
+    const x2 = cx + side * (55 + r() * 85), y2 = 410 + r() * 100;
+    g.lineWidth = 1.5 + r() * 4;
+    g.strokeStyle = r() < 0.22 ? 'rgba(150,160,175,0.55)' : r() < 0.5 ? '#1b1c22' : '#0c0c10';
+    g.beginPath();
+    g.moveTo(x0, y0);
+    g.bezierCurveTo(x1 + side * 10, y1 - 70, x1 - side * r() * 25, y1, x2, y2);
+    g.stroke();
+  }
+
+  // Gaunt face: high cheekbones, hollow cheeks, long crooked chin.
+  const face = new Path2D();
+  face.moveTo(cx, 206);
+  face.bezierCurveTo(cx + 62, 206, cx + 80, 250, cx + 76, 300);
+  face.bezierCurveTo(cx + 73, 340, cx + 52, 360, cx + 40, 386);
+  face.bezierCurveTo(cx + 28, 412, cx + 14, 432, cx + 4, 436);
+  face.bezierCurveTo(cx - 9, 432, cx - 26, 410, cx - 38, 384);
+  face.bezierCurveTo(cx - 52, 358, cx - 74, 340, cx - 76, 300);
+  face.bezierCurveTo(cx - 80, 250, cx - 62, 206, cx, 206);
+  const skin = g.createRadialGradient(cx - 26, 272, 8, cx - 8, 300, 170);
+  skin.addColorStop(0, '#a9bd94');
+  skin.addColorStop(0.4, '#64804f');
+  skin.addColorStop(1, '#172214');
+  g.fillStyle = skin;
+  g.fill(face);
+
+  g.save();
+  g.clip(face);
+  // Blotchy, aged skin
+  blur(5);
+  for (let i = 0; i < 70; i++) {
+    const x = cx - 75 + r() * 150, y = 210 + r() * 220, rr = 3 + r() * 11;
+    g.fillStyle = r() < 0.6 ? `rgba(20,30,14,${0.12 + r() * 0.18})` : `rgba(200,220,170,${0.06 + r() * 0.1})`;
+    g.beginPath(); g.arc(x, y, rr, 0, Math.PI * 2); g.fill();
+  }
+  blur(0);
+  // Shadow side (away from the moon) and the hat's shadow on the forehead
+  let sh = g.createLinearGradient(cx - 10, 0, cx + 80, 0);
+  sh.addColorStop(0, 'rgba(8,16,8,0)');
+  sh.addColorStop(1, 'rgba(8,16,8,0.6)');
+  g.fillStyle = sh; g.fillRect(0, 0, FACE.w, FACE.h);
+  sh = g.createLinearGradient(0, 206, 0, 250);
+  sh.addColorStop(0, 'rgba(5,8,5,0.85)');
+  sh.addColorStop(1, 'rgba(5,8,5,0)');
+  g.fillStyle = sh; g.fillRect(0, 200, FACE.w, 60);
+  // Sunken cheeks and temples
+  blur(9);
+  g.fillStyle = 'rgba(14,24,12,0.6)';
+  for (const d of [-1, 1]) {
+    g.beginPath(); g.ellipse(cx + d * 50, 352, 17, 30, d * 0.25, 0, Math.PI * 2); g.fill();
+    g.beginPath(); g.ellipse(cx + d * 70, 262, 10, 22, 0, 0, Math.PI * 2); g.fill();
+  }
+  // Moonlit cheekbones, brow and chin
+  g.fillStyle = 'rgba(225,245,205,0.38)';
+  g.beginPath(); g.ellipse(cx - 46, 318, 20, 9, -0.35, 0, Math.PI * 2); g.fill();
+  g.beginPath(); g.ellipse(cx - 30, 254, 26, 8, 0.15, 0, Math.PI * 2); g.fill();
+  g.beginPath(); g.ellipse(cx - 6, 418, 12, 8, 0, 0, Math.PI * 2); g.fill();
+  g.fillStyle = 'rgba(225,245,205,0.16)';
+  g.beginPath(); g.ellipse(cx + 46, 318, 16, 7, 0.35, 0, Math.PI * 2); g.fill();
+  // Deep eye sockets
+  g.fillStyle = 'rgba(4,7,4,0.92)';
+  for (const [ex, ey] of FACE.eyes) {
+    const d = ex < cx ? -1 : 1;
+    g.beginPath(); g.ellipse(ex, ey - 1, 28, 19, d * 0.2, 0, Math.PI * 2); g.fill();
+  }
+  g.fillStyle = 'rgba(4,7,4,0.5)';                    // shadow under the brow ridge
+  g.fillRect(cx - 70, 262, 140, 18);
+  blur(3);
+  g.fillStyle = '#020302';
+  for (const [ex, ey] of FACE.eyes) {
+    const d = ex < cx ? -1 : 1;
+    g.beginPath(); g.ellipse(ex, ey, 19, 11, d * 0.18, 0, Math.PI * 2); g.fill();
+  }
+  // Bags under the eyes
+  blur(0);
+  for (const [ex, ey] of FACE.eyes) {
+    g.strokeStyle = 'rgba(10,18,8,0.7)'; g.lineWidth = 2.2;
+    g.beginPath(); g.moveTo(ex - 18, ey + 14); g.quadraticCurveTo(ex, ey + 24, ex + 18, ey + 14); g.stroke();
+    g.strokeStyle = 'rgba(210,235,190,0.25)'; g.lineWidth = 1.5;
+    g.beginPath(); g.moveTo(ex - 16, ey + 18); g.quadraticCurveTo(ex, ey + 28, ex + 16, ey + 18); g.stroke();
+  }
+  // Forehead wrinkles (dark crease with a lit edge under it)
+  for (let i = 0; i < 4; i++) {
+    const y = 232 + i * 7, wv = 30 - i * 3;
+    g.strokeStyle = 'rgba(10,16,8,0.65)'; g.lineWidth = 1.8;
+    g.beginPath(); g.moveTo(cx - wv - 10, y + 2); g.bezierCurveTo(cx - 10, y - 4, cx + 10, y + 4, cx + wv + 8, y - 1); g.stroke();
+    g.strokeStyle = 'rgba(215,240,195,0.22)'; g.lineWidth = 1.2;
+    g.beginPath(); g.moveTo(cx - wv - 8, y + 4.5); g.bezierCurveTo(cx - 10, y - 1.5, cx + 10, y + 6.5, cx + wv + 6, y + 1.5); g.stroke();
+  }
+  // Frown lines between the brows, crow's feet
+  g.strokeStyle = 'rgba(8,14,6,0.75)'; g.lineWidth = 2;
+  g.beginPath(); g.moveTo(cx - 6, 262); g.quadraticCurveTo(cx - 9, 274, cx - 5, 286); g.stroke();
+  g.beginPath(); g.moveTo(cx + 7, 263); g.quadraticCurveTo(cx + 10, 275, cx + 6, 286); g.stroke();
+  g.lineWidth = 1.4;
+  for (const d of [-1, 1]) {
+    for (let i = -1; i <= 1; i++) {
+      g.beginPath(); g.moveTo(cx + d * 62, 288 + i * 7); g.lineTo(cx + d * 74, 286 + i * 11); g.stroke();
+    }
+  }
+  // Nose-to-mouth folds
+  g.strokeStyle = 'rgba(8,14,6,0.7)'; g.lineWidth = 2.6;
+  for (const d of [-1, 1]) {
+    g.beginPath(); g.moveTo(cx + d * 22, 362); g.quadraticCurveTo(cx + d * 40, 378, cx + d * 40, 400); g.stroke();
+  }
+  g.restore();
+
+  // Heavy angry brows slanting down towards the nose
+  g.fillStyle = '#0b0d0a';
+  for (const d of [-1, 1]) {
+    g.beginPath();
+    g.moveTo(cx + d * 66, 262);
+    g.quadraticCurveTo(cx + d * 40, 250, cx + d * 9, 275);
+    g.quadraticCurveTo(cx + d * 38, 262, cx + d * 66, 268);
+    g.closePath(); g.fill();
+    g.strokeStyle = '#121410'; g.lineWidth = 1.4;
+    for (let i = 0; i < 9; i++) {
+      const u = i / 8, bx = cx + d * (64 - u * 52), by = 262 - Math.sin(u * Math.PI) * 6 + u * 9;
+      g.beginPath(); g.moveTo(bx, by); g.lineTo(bx + d * (r() * 6 - 3), by - 4 - r() * 4); g.stroke();
+    }
+  }
+
+  // Long hooked nose: lit bridge, shadowed side, drooping bulbous tip.
+  const nose = new Path2D();
+  nose.moveTo(cx - 7, 276);
+  nose.bezierCurveTo(cx - 11, 312, cx - 17, 340, cx - 21, 358);
+  nose.quadraticCurveTo(cx - 14, 368, cx - 4, 364);
+  nose.quadraticCurveTo(cx + 5, 376, cx + 13, 364);
+  nose.quadraticCurveTo(cx + 24, 368, cx + 26, 356);
+  nose.bezierCurveTo(cx + 19, 336, cx + 12, 312, cx + 9, 276);
+  nose.closePath();
+  const ng = g.createLinearGradient(cx - 20, 0, cx + 26, 0);
+  ng.addColorStop(0, '#a8bf90');
+  ng.addColorStop(0.45, '#7f9a68');
+  ng.addColorStop(1, '#26341f');
+  g.fillStyle = ng; g.fill(nose);
+  g.save(); g.clip(nose);
+  blur(3);
+  g.fillStyle = 'rgba(235,250,215,0.55)';
+  g.beginPath(); g.ellipse(cx - 3, 315, 4, 32, -0.08, 0, Math.PI * 2); g.fill();
+  blur(0);
+  g.restore();
+  // tip, hooked down past the nostrils
+  const tip = g.createRadialGradient(cx - 2, 352, 2, cx + 4, 358, 18);
+  tip.addColorStop(0, '#b9cf9f'); tip.addColorStop(0.6, '#728c5c'); tip.addColorStop(1, '#2c3b24');
+  g.fillStyle = tip;
+  g.beginPath(); g.ellipse(cx + 4, 360, 15, 14, 0, 0, Math.PI * 2); g.fill();
+  g.fillStyle = '#0a0d08';
+  g.beginPath(); g.ellipse(cx - 10, 368, 5, 3.2, 0.4, 0, Math.PI * 2); g.fill();
+  g.beginPath(); g.ellipse(cx + 18, 368, 5, 3.2, -0.4, 0, Math.PI * 2); g.fill();
+  // Warts with a few hairs
+  const wart = (x, y, rr) => {
+    const wg = g.createRadialGradient(x - rr * 0.4, y - rr * 0.4, 0.5, x, y, rr);
+    wg.addColorStop(0, '#c8d6a8'); wg.addColorStop(0.5, '#6a7d4e'); wg.addColorStop(1, '#2a3320');
+    g.fillStyle = wg;
+    g.beginPath(); g.arc(x, y, rr, 0, Math.PI * 2); g.fill();
+    g.strokeStyle = '#151610'; g.lineWidth = 1;
+    for (let i = 0; i < 3; i++) { g.beginPath(); g.moveTo(x, y - rr * 0.5); g.lineTo(x + (i - 1) * 4, y - rr - 5 - r() * 3); g.stroke(); }
+  };
+  wart(cx + 13, 326, 5);
+  wart(cx - 16, 420, 6);
+  wart(cx + 52, 340, 3.5);
+
+  // Sneering mouth: crooked grin full of rotten, uneven teeth.
+  const mouth = new Path2D();
+  mouth.moveTo(cx - 38, 392);
+  mouth.quadraticCurveTo(cx - 8, 382, cx + 12, 386);
+  mouth.quadraticCurveTo(cx + 30, 384, cx + 42, 382);
+  mouth.quadraticCurveTo(cx + 22, 410, cx - 2, 410);
+  mouth.quadraticCurveTo(cx - 24, 409, cx - 38, 392);
+  mouth.closePath();
+  g.fillStyle = '#0d0505';
+  g.fill(mouth);
+  g.save(); g.clip(mouth);
+  const teeth = [[-30, 6, 9, 0.2], [-22, 7, 12, -0.1], [-13, 6, 8, 0.15], [-2, 7, 14, 0.05], [16, 6, 10, -0.2], [26, 7, 13, 0.1], [35, 5, 8, -0.15]];
+  for (const [tx, tw, th, rot] of teeth) {
+    g.save();
+    g.translate(cx + tx, 385);
+    g.rotate(rot);
+    const tg = g.createLinearGradient(0, 0, 0, th);
+    tg.addColorStop(0, '#d8cf9a'); tg.addColorStop(1, '#6e6235');
+    g.fillStyle = tg;
+    g.beginPath(); g.moveTo(-tw / 2, -2); g.lineTo(tw / 2, -2); g.lineTo(tw * 0.3, th); g.quadraticCurveTo(0, th + 2, -tw * 0.35, th - 1); g.closePath(); g.fill();
+    g.restore();
+  }
+  for (const [tx, th] of [[-17, 7], [8, 9]]) {          // a few lower teeth
+    g.fillStyle = '#8f8452';
+    g.beginPath(); g.moveTo(cx + tx - 3, 410); g.lineTo(cx + tx + 3, 410); g.lineTo(cx + tx, 410 - th); g.closePath(); g.fill();
+  }
+  g.restore();
+  g.strokeStyle = '#2c2a22'; g.lineWidth = 2.4;
+  g.stroke(mouth);
+  g.strokeStyle = 'rgba(215,240,195,0.3)'; g.lineWidth = 1.4;
+  g.beginPath(); g.moveTo(cx - 30, 414); g.quadraticCurveTo(cx, 420, cx + 26, 410); g.stroke();
+
+  // Moonlight rim along the left edge of the face
+  const rim = g.createLinearGradient(cx - 80, 0, cx, 0);
+  rim.addColorStop(0, 'rgba(205,225,255,0.8)');
+  rim.addColorStop(1, 'rgba(205,225,255,0)');
+  g.strokeStyle = rim; g.lineWidth = 3;
+  g.stroke(face);
+
+  // Strands of hair falling over the face edges
+  for (let i = 0; i < 22; i++) {
+    const side = i % 2 ? 1 : -1;
+    const x0 = cx + side * (34 + r() * 30), y0 = 210;
+    g.lineWidth = 1.2 + r() * 2.4;
+    g.strokeStyle = r() < 0.25 ? 'rgba(160,170,185,0.6)' : '#101014';
+    g.beginPath();
+    g.moveTo(x0, y0);
+    g.bezierCurveTo(x0 + side * (16 + r() * 10), 260, x0 + side * (10 + r() * 20), 330, x0 + side * (14 + r() * 30), 380 + r() * 80);
+    g.stroke();
+  }
+
+  // Hat: wide floppy brim, band with a dull buckle, bent cone.
+  g.fillStyle = '#0a0910';
+  g.beginPath();
+  g.moveTo(cx - 64, 206);
+  g.bezierCurveTo(cx - 70, 150, cx - 30, 90, cx + 6, 52);
+  g.quadraticCurveTo(cx + 40, 20, cx + 92, 14);
+  g.quadraticCurveTo(cx + 56, 40, cx + 40, 80);
+  g.bezierCurveTo(cx + 34, 120, cx + 58, 160, cx + 66, 206);
+  g.closePath(); g.fill();
+  g.strokeStyle = 'rgba(190,205,255,0.5)'; g.lineWidth = 2.2;
+  g.beginPath(); g.moveTo(cx - 62, 196); g.bezierCurveTo(cx - 66, 150, cx - 28, 92, cx + 6, 54); g.quadraticCurveTo(cx + 40, 22, cx + 90, 15); g.stroke();
+  g.fillStyle = '#26163a';
+  g.beginPath(); g.moveTo(cx - 64, 180); g.quadraticCurveTo(cx, 170, cx + 64, 180); g.lineTo(cx + 66, 200); g.quadraticCurveTo(cx, 190, cx - 64, 200); g.closePath(); g.fill();
+  g.strokeStyle = '#7d7356'; g.lineWidth = 3;
+  g.strokeRect(cx - 10, 178, 20, 17);
+  const brim = g.createLinearGradient(0, 180, 0, 236);
+  brim.addColorStop(0, '#16141e'); brim.addColorStop(1, '#050408');
+  g.fillStyle = brim;
+  g.beginPath();
+  g.moveTo(cx - 168, 214);
+  g.quadraticCurveTo(cx - 100, 186, cx, 190);
+  g.quadraticCurveTo(cx + 100, 186, cx + 166, 206);
+  g.quadraticCurveTo(cx + 100, 236, cx, 232);
+  g.quadraticCurveTo(cx - 100, 238, cx - 168, 214);
+  g.closePath(); g.fill();
+  g.strokeStyle = 'rgba(190,205,255,0.45)'; g.lineWidth = 2;
+  g.beginPath(); g.moveTo(cx - 166, 212); g.quadraticCurveTo(cx - 100, 185, cx, 189); g.stroke();
+  return c;
 }
 
 function drawBat(ctx, x, y, s, flap) {
@@ -535,6 +811,9 @@ export class Halloween {
     this.warm = makeGlow(128, GLOW_WARM);
     this.eyeGlow = makeGlow(32, [[0, 'rgba(255,240,170,1)'], [0.35, 'rgba(255,190,60,0.6)'], [1, 'rgba(255,150,30,0)']]);
     this.ghostGlow = makeGlow(128, [[0, 'rgba(210,230,255,0.6)'], [1, 'rgba(180,200,255,0)']]);
+    this.witchEyeGlow = makeGlow(64, [[0, 'rgba(250,255,210,1)'], [0.22, 'rgba(210,255,90,0.7)'], [0.55, 'rgba(150,240,50,0.22)'], [1, 'rgba(110,220,30,0)']]);
+    this.ghostEyeGlow = makeGlow(64, [[0, 'rgba(235,250,255,1)'], [0.25, 'rgba(150,215,255,0.6)'], [1, 'rgba(90,160,255,0)']]);
+    this.witchFace = renderWitchFace();
     this.skullGlow = makeGlow(32, [[0, 'rgba(190,255,200,1)'], [0.4, 'rgba(120,255,160,0.5)'], [1, 'rgba(80,220,120,0)']]);
     this.drop = makeGlow(16, [[0, 'rgba(230,240,255,1)'], [1, 'rgba(200,220,255,0)']]);
     this.gust = 0; this.gustDir = 1; this.gustT = -1; this.nextGust = 25;
@@ -554,6 +833,7 @@ export class Halloween {
     this.W = W; this.H = H; this.hy = hy; this.moon = moon; this.shoreY = shoreY;
     this.left = renderTree(W, H, 'left', this.seed * 3 + 1, moon);
     this.right = renderTree(W, H, 'right', this.seed * 7 + 2, moon);
+    this.treeSpiderSize = 0.011 + Math.random() * 0.02;     // the resident spider: a new size each load
     this.perches = [
       ...this.left.perches.map(p => ({ ...p, tree: 'left' })),
       ...this.right.perches.map(p => ({ ...p, tree: 'right' })),
@@ -627,10 +907,8 @@ export class Halloween {
       { x: W * 0.105, y: H * 0.952, ...renderPumpkin(H * 0.085, 0, 5) },
       { x: W * 0.19, y: H * 0.978, ...renderPumpkin(H * 0.056, 2, 8) },
       { x: W * 0.238, y: H * 0.997, ...renderPumpkin(H * 0.036, 1, 9) },
-      // right side
-      { x: W * 0.7, y: H * 0.995, ...renderPumpkin(H * 0.046, 2, 11) },
-      { x: W * 0.765, y: H * 0.982, ...renderPumpkin(H * 0.07, 0, 13) },
-      { x: W * 0.818, y: H * 0.962, ...renderPumpkin(H * 0.036, 1, 17) },
+      // right side: one big lantern is enough
+      { x: W * 0.755, y: H * 0.985, ...renderPumpkin(H * 0.07, 0, 13) },
     ].map((p, i) => ({ ...p, seed: i * 7.3 }));
 
     this.web = this.renderWeb(W, H);
@@ -748,7 +1026,12 @@ export class Halloween {
   // ---------- Skeleton ----------
   spawnSpider() {
     const { W, H } = this;
-    const sp = { t: 0, down: 5 + Math.random() * 3, pause: 4 + Math.random() * 5, up: 5, len: H * (0.1 + Math.random() * 0.2), s: H * (0.016 + Math.random() * 0.008), ph: Math.random() * 6 };
+    // Sizes vary: tiny, medium or a big hairy one (never two of the same kind at once).
+    const used = this.spiders.map(o => o.size);
+    const kinds = ['small', 'medium', 'big'].filter(k => !used.includes(k));
+    const size = kinds[Math.floor(Math.random() * kinds.length)] || 'medium';
+    const s = H * (size === 'small' ? 0.008 + Math.random() * 0.005 : size === 'medium' ? 0.015 + Math.random() * 0.007 : 0.028 + Math.random() * 0.012);
+    const sp = { t: 0, down: 5 + Math.random() * 3, pause: 4 + Math.random() * 5, up: 5, len: H * (0.1 + Math.random() * 0.2) * (size === 'big' ? 1.2 : 1), s, size, ph: Math.random() * 6 };
     // Hang from a high branch point of a foreground tree, or from the top edge.
     const cands = [];
     for (const [tree, side] of [[this.left, 'left'], [this.right, 'right']]) {
@@ -909,6 +1192,9 @@ export class Halloween {
       w.dur = 11; w.r = this.moon.r * (2.4 + Math.random() * 0.6); w.a0 = Math.random() * 6.28;
       w.turns = (Math.random() < 0.5 ? -1 : 1) * 1.1; w.s0 = H * (0.055 + Math.random() * 0.025);
     }
+    // About halfway she slows, turns her head and stares at the audience.
+    w.lookAt = w.kind === 'approach' ? 0.6 : 0.45 + Math.random() * 0.1;
+    w.look = null; w.m = 0; w.rate = 1;
     this.witch = w;
     this.nextWitch = 180 + Math.random() * 120;
   }
@@ -947,11 +1233,89 @@ export class Halloween {
     const a = this.witchPos(w, p), b = this.witchPos(w, Math.min(1, p + 0.01));
     const isFront = w.kind === 'approach' && a.s > this.H * 0.1;
     if (isFront !== front) return;
+    // While staring she swoops a little closer and stays fully on screen.
+    const m = w.m || 0;
+    let { x, y, s } = a;
+    if (m > 0) {
+      s = lerp(s, Math.max(s, this.H * 0.18), m);
+      x = lerp(x, Math.max(this.W * 0.18, Math.min(this.W * 0.82, x)), m);
+      y = lerp(y, Math.max(y, s * 1.5 + this.H * 0.02), m);
+    }
+    const flip = b.x < a.x;
     ctx.save();
     ctx.shadowColor = RIM;
-    ctx.shadowBlur = a.s * 0.28;
-    if (b.x < a.x) { ctx.translate(a.x, 0); ctx.scale(-1, 1); ctx.translate(-a.x, 0); }
-    drawWitch(ctx, a.x, a.y, a.s, t);
+    ctx.shadowBlur = s * 0.28;
+    if (flip) { ctx.translate(x, 0); ctx.scale(-1, 1); ctx.translate(-x, 0); }
+    drawWitch(ctx, x, y, s, t, m, flip, m > 0 ? (c, sz) => this.drawWitchFace(c, sz, w, t) : null);
+    ctx.restore();
+  }
+
+  // Her look: ease in (0.6 s), stare (~2.4 s), ease back (0.6 s).
+  updateWitchLook(w, dt) {
+    if (!w.look && w.t / w.dur >= w.lookAt) {
+      w.look = { t: 0, dur: 3.6 };
+      const px = this.witchPos(w, w.t / w.dur).x / this.W;
+      this.onEvent && this.onEvent('cackle', Math.max(-0.8, Math.min(0.8, (px - 0.5) * 1.4)));
+    }
+    let m = 0;
+    const L = w.look;
+    if (L && L.t < L.dur) {
+      L.t += dt;
+      const k = L.t;
+      m = k < 0.6 ? ease3(k / 0.6) : k > L.dur - 0.6 ? ease3(clamp01((L.dur - k) / 0.6)) : 1;
+    }
+    w.m = m;
+    w.rate = 1 - 0.9 * m;
+  }
+
+  // The front-facing head: pre-rendered face plus live glowing eyes.
+  drawWitchFace(ctx, s, w, t) {
+    const m = w.m;
+    const a = clamp01(m * 2.2 - 0.1);
+    if (a <= 0) return;
+    const sc = (s * 0.2) / FACE.hw;
+    const since = w.look ? w.look.t : 0;
+    const open = clamp01((m - 0.55) / 0.3);                   // eyes snap open once she faces you
+    const flare = since > 0.5 ? Math.exp(-(since - 0.5) * 2.4) : 0;
+    const pulse = 0.85 + 0.15 * Math.sin(t * 9) + flare;
+    ctx.save();
+    ctx.shadowBlur = 0;
+    ctx.shadowColor = 'rgba(0,0,0,0)';
+    ctx.scale(sc * lerp(0.35, 1, m), sc);                    // squashed while turning
+    ctx.translate(-FACE.cx, -FACE.cy);
+    ctx.globalAlpha = a;
+    ctx.drawImage(this.witchFace, 0, 0);
+    if (open > 0) {
+      for (const [ex, ey] of FACE.eyes) {
+        const o = ex < FACE.cx ? -1 : 1;
+        const ig = ctx.createRadialGradient(ex, ey, 0, ex, ey, 17);
+        ig.addColorStop(0, '#ffffe8');
+        ig.addColorStop(0.35, '#efff70');
+        ig.addColorStop(1, '#58a812');
+        ctx.fillStyle = ig;
+        ctx.globalAlpha = a;
+        ctx.beginPath();
+        ctx.moveTo(ex + o * 17, ey - 5);
+        ctx.quadraticCurveTo(ex + o * 4, ey - 3 - 9 * open, ex - o * 14, ey + 3);
+        ctx.quadraticCurveTo(ex - o * 1, ey + 3 + 8 * open, ex + o * 17, ey - 5);
+        ctx.fill();
+        ctx.fillStyle = '#0a0602';                            // cat-like slit pupil
+        ctx.beginPath(); ctx.ellipse(ex + o * 1, ey, 2.4, 7 * open, 0, 0, Math.PI * 2); ctx.fill();
+      }
+      ctx.globalCompositeOperation = 'lighter';
+      const ga = a * open;
+      ctx.globalAlpha = ga * 0.35;                            // eye light spilling onto her face
+      ctx.drawImage(this.witchEyeGlow, FACE.cx - 120, FACE.eyes[0][1] - 100, 240, 200);
+      for (const [ex, ey] of FACE.eyes) {
+        const R = 44 * pulse;
+        ctx.globalAlpha = Math.min(1, ga * pulse);
+        ctx.drawImage(this.witchEyeGlow, ex - R, ey - R, R * 2, R * 2);
+        if (flare > 0.02) {                                   // a sharp glint as her eyes flash
+          ctx.globalAlpha = ga * flare;
+          ctx.drawImage(this.witchEyeGlow, ex - 110 * flare - 20, ey - 5, (110 * flare + 20) * 2, 10);
+        }
+      }
+    }
     ctx.restore();
   }
 
@@ -980,7 +1344,7 @@ export class Halloween {
     if (g.t > g.life) return { kind: 'leave', t: 0, dur: 1.6 };
     if (r < 0.5) { const s = spot(); return { kind: 'drift', t: 0, dur: 4 + Math.random() * 4, fx: g.x, fz: g.z, tx: s.x, tz: s.z }; }
     if (r < 0.78) { const s = spot(); return { kind: 'hide', t: 0, dur: 3 + Math.random() * 2.5, nx: s.x, nz: s.z }; }
-    return { kind: 'approach', t: 0, dur: 4.2, fx: g.x, fz: g.z, tx: W * (0.35 + Math.random() * 0.3), tz: 0.97 };
+    return { kind: 'approach', t: 0, dur: 7, fx: g.x, fz: g.z, tx: W * (0.35 + Math.random() * 0.3), tz: 0.9 };
   }
 
   updateGhost(dt) {
@@ -995,24 +1359,42 @@ export class Halloween {
       const e = ease3(k);
       g.x = lerp(a.fx, a.tx, e); g.z = lerp(a.fz, a.tz, e); g.fade = 1;
     } else if (a.kind === 'hide') {
-      // fade out, wait unseen, reappear somewhere else
-      if (k < 0.25) g.fade = 1 - k / 0.25;
-      else if (k < 0.75) { g.fade = 0; g.x = a.nx; g.z = a.nz; }
-      else g.fade = (k - 0.75) / 0.25;
+      // Fade out (from however visible it is now), move only once it is
+      // truly invisible, then fade back in somewhere else.
+      const f0 = a.f0 ?? 1;
+      if (k < 0.25) g.fade = f0 * (1 - k / 0.25);
+      else if (k < 0.75) {
+        g.fade = 0;
+        if (!a.moved && g.vis < 0.004) { g.x = a.nx; g.z = a.nz; a.moved = true; }
+      } else {
+        if (!a.moved) { g.vis = 0; g.x = a.nx; g.z = a.nz; a.moved = true; }
+        g.fade = ease3((k - 0.75) / 0.25);
+      }
     } else if (a.kind === 'approach') {
-      const e = Math.pow(k, 1.7);
-      g.x = lerp(a.fx, a.tx, e); g.z = lerp(a.fz, a.tz, e);
-      g.fade = k > 0.85 ? 1 - (k - 0.85) / 0.15 : 1;          // vanishes right in front of you
-      if (k >= 1) { g.z = 0.1 + Math.random() * 0.2; g.x = this.W * (0.2 + Math.random() * 0.6); g.fade = 0; }
+      // Glides up close, stops and stares at you, then slowly dissolves.
+      if (k < 0.55) {
+        const e = ease3(k / 0.55);
+        g.x = lerp(a.fx, a.tx, e); g.z = lerp(a.fz, a.tz, e); g.fade = 1;
+      } else if (k < 0.8) {
+        g.z = a.tz + (k - 0.55) * 0.12; g.fade = 1;
+      } else {
+        const q = (k - 0.8) / 0.2;
+        g.z = a.tz + 0.03 + q * 0.06;
+        g.fade = 1 - ease3(q);
+      }
+      g.stare = k < 0.5 ? 0 : k < 0.6 ? (k - 0.5) / 0.1 : 1;
     } else if (a.kind === 'leave') {
       g.fade = 1 - k;
       if (k >= 1) { this.ghost = null; return; }
     }
     if (Math.abs(g.x - px) > 0.5) g.dir = g.x > px ? 1 : -1;
     g.vis += ((g.t < 1.5 ? g.t / 1.5 : 1) * g.fade - g.vis) * Math.min(1, dt * 6);
+    if (a.kind !== 'approach') g.stare = Math.max(0, (g.stare || 0) - dt * 2);
     if (k >= 1) {
       g.act = this.ghostNextAct(g);
-      if (a.kind === 'approach') g.act = { kind: 'hide', t: 0, dur: 2.5, nx: g.x, nz: g.z };
+      if (a.kind === 'approach') {
+        g.act = { kind: 'hide', t: 0, dur: 3, f0: 0, nx: this.W * (0.2 + Math.random() * 0.6), nz: 0.1 + Math.random() * 0.2 };
+      } else if (g.act.kind === 'hide') g.act.f0 = g.fade;
     }
   }
 
@@ -1044,12 +1426,47 @@ export class Halloween {
     grad.addColorStop(1, 'rgba(205,220,255,0)');
     ctx.fillStyle = grad;
     ctx.fill();
-    ctx.fillStyle = 'rgba(10,12,30,1)';
-    ctx.globalAlpha = Math.min(1, a * 2);
-    ctx.beginPath(); ctx.ellipse(-s * 0.15, -s * 0.25, s * 0.06, s * 0.09, 0, 0, Math.PI * 2); ctx.fill();
-    ctx.beginPath(); ctx.ellipse(s * 0.12, -s * 0.25, s * 0.06, s * 0.09, 0, 0, Math.PI * 2); ctx.fill();
-    ctx.beginPath(); ctx.ellipse(-s * 0.01, -s * 0.05, s * 0.06, s * 0.08, 0, 0, Math.PI * 2); ctx.fill();
+    // Face: undo the mirror so it always looks straight out at the audience.
+    if (g.dir < 0) ctx.scale(-1, 1);
+    this.drawGhostFace(ctx, g, s, a, x, t, L);
     ctx.restore();
+  }
+
+  // Hollow eye sockets with glowing pupils that look out of the screen
+  // (towards the audience, nudged towards the middle of the room), a moaning mouth.
+  drawGhostFace(ctx, g, s, a, x, t, L) {
+    const stare = g.stare || 0;
+    const blinkT = (t + (g.life || 0)) % 4.7;
+    const lid = stare > 0.5 ? 1 : blinkT < 0.16 ? Math.abs(blinkT - 0.08) / 0.08 : 1;
+    const eyeY = -s * 0.25, ex = s * 0.135;
+    const rx = s * (0.062 + stare * 0.012), ry = s * (0.09 + stare * 0.02);
+    ctx.fillStyle = 'rgba(8,10,28,1)';
+    ctx.globalAlpha = Math.min(1, a * 3.2);
+    for (const d of [-1, 1]) {
+      ctx.beginPath(); ctx.ellipse(d * ex, eyeY, rx, ry * Math.max(0.15, lid), d * -0.12, 0, Math.PI * 2); ctx.fill();
+    }
+    const mouthH = s * (0.075 + stare * 0.06 + Math.sin(t * 1.3) * 0.01);
+    ctx.beginPath(); ctx.ellipse(0, -s * 0.03 + stare * s * 0.02, s * (0.05 + stare * 0.015), mouthH, 0, 0, Math.PI * 2); ctx.fill();
+    if (lid < 0.3) return;
+    // Pupils: centred in the sockets reads as "looking at you"; a small
+    // shift towards the middle of the screen makes them follow the room.
+    const look = Math.max(-1, Math.min(1, (this.W * 0.5 - x) / (this.W * 0.4)));
+    const px = look * rx * 0.25, py = ry * 0.08;
+    const vis = g.vis * (1 - L * 0.3);
+    const pr = s * (0.022 + stare * 0.008);
+    for (const d of [-1, 1]) {
+      const cx = d * ex + px, cy = eyeY + py;
+      ctx.globalAlpha = Math.min(1, vis * (0.75 + stare * 0.25));
+      ctx.fillStyle = '#eaf6ff';
+      ctx.beginPath(); ctx.ellipse(cx, cy, pr, pr * 1.15 * lid, 0, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.globalCompositeOperation = 'lighter';
+    const R = s * (0.16 + stare * 0.08) * (0.92 + 0.08 * Math.sin(t * 5));
+    for (const d of [-1, 1]) {
+      ctx.globalAlpha = Math.min(1, vis * (0.55 + stare * 0.45));
+      ctx.drawImage(this.ghostEyeGlow, d * ex + px - R, eyeY + py - R, R * 2, R * 2);
+    }
+    ctx.globalCompositeOperation = 'source-over';
   }
 
   // Sky layer: witch and bats, with a faint moonlit glow so they stand out.
@@ -1058,7 +1475,8 @@ export class Halloween {
     ctx.save();
     ctx.shadowColor = RIM;
     if (this.witch) {
-      this.witch.t += dt;
+      this.updateWitchLook(this.witch, dt);
+      this.witch.t += dt * this.witch.rate;
       if (this.witch.t >= this.witch.dur) this.witch = null;
       else this.drawWitchLayer(ctx, t, false);
     }
@@ -1470,7 +1888,7 @@ export class Halloween {
     const cyc = (t % 40) / 40;
     const k = cyc < 0.4 ? cyc / 0.4 : cyc < 0.55 ? 1 : cyc < 0.95 ? 1 - (cyc - 0.55) / 0.4 : 0;
     const len = H * (0.03 + 0.14 * (0.5 - 0.5 * Math.cos(k * Math.PI)));
-    this.spiderAt(ctx, ax, ay, len, H * 0.017, t, 0);
+    this.spiderAt(ctx, ax, ay, len, H * this.treeSpiderSize, t, 0);
   }
 
   drawDropSpider(ctx, sp, t) {
@@ -1488,7 +1906,7 @@ export class Halloween {
     const sx = ax + sway, sy = ay + len;
     ctx.save();
     ctx.strokeStyle = 'rgba(225,230,245,0.6)';
-    ctx.lineWidth = 1.2;
+    ctx.lineWidth = Math.max(1, s * 0.07);
     ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(sx, sy); ctx.stroke();
     ctx.shadowColor = RIM;
     ctx.shadowBlur = s * 0.9;
