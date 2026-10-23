@@ -812,7 +812,6 @@ export class Halloween {
     this.eyeGlow = makeGlow(32, [[0, 'rgba(255,240,170,1)'], [0.35, 'rgba(255,190,60,0.6)'], [1, 'rgba(255,150,30,0)']]);
     this.ghostGlow = makeGlow(128, [[0, 'rgba(210,230,255,0.6)'], [1, 'rgba(180,200,255,0)']]);
     this.witchEyeGlow = makeGlow(64, [[0, 'rgba(250,255,210,1)'], [0.22, 'rgba(210,255,90,0.7)'], [0.55, 'rgba(150,240,50,0.22)'], [1, 'rgba(110,220,30,0)']]);
-    this.ghostEyeGlow = makeGlow(64, [[0, 'rgba(235,250,255,1)'], [0.25, 'rgba(150,215,255,0.6)'], [1, 'rgba(90,160,255,0)']]);
     this.witchFace = renderWitchFace();
     this.skullGlow = makeGlow(32, [[0, 'rgba(190,255,200,1)'], [0.4, 'rgba(120,255,160,0.5)'], [1, 'rgba(80,220,120,0)']]);
     this.drop = makeGlow(16, [[0, 'rgba(230,240,255,1)'], [1, 'rgba(200,220,255,0)']]);
@@ -1432,41 +1431,27 @@ export class Halloween {
     ctx.restore();
   }
 
-  // Hollow eye sockets with glowing pupils that look out of the screen
-  // (towards the audience, nudged towards the middle of the room), a moaning mouth.
+  // Dark hollow eyes, facing straight out at the audience: slanted
+  // teardrop shapes (drooping at the outer corners), and a moaning mouth.
   drawGhostFace(ctx, g, s, a, x, t, L) {
     const stare = g.stare || 0;
     const blinkT = (t + (g.life || 0)) % 4.7;
-    const lid = stare > 0.5 ? 1 : blinkT < 0.16 ? Math.abs(blinkT - 0.08) / 0.08 : 1;
-    const eyeY = -s * 0.25, ex = s * 0.135;
-    const rx = s * (0.062 + stare * 0.012), ry = s * (0.09 + stare * 0.02);
-    ctx.fillStyle = 'rgba(8,10,28,1)';
-    ctx.globalAlpha = Math.min(1, a * 3.2);
+    const lid = stare > 0.5 ? 1 : blinkT < 0.16 ? Math.max(0.12, Math.abs(blinkT - 0.08) / 0.08) : 1;
+    const eyeY = -s * 0.25, ex = s * 0.14;
+    const w = s * (0.068 + stare * 0.01), h = s * (0.095 + stare * 0.015) * lid;
+    ctx.fillStyle = 'rgba(10,12,30,1)';
+    ctx.globalAlpha = Math.min(1, a * 2);
     for (const d of [-1, 1]) {
-      ctx.beginPath(); ctx.ellipse(d * ex, eyeY, rx, ry * Math.max(0.15, lid), d * -0.12, 0, Math.PI * 2); ctx.fill();
+      const cx = d * ex;
+      ctx.beginPath();
+      ctx.moveTo(cx - d * w * 0.9, eyeY - h * 0.55);                           // inner top corner
+      ctx.bezierCurveTo(cx - d * w * 0.2, eyeY - h * 1.15, cx + d * w * 1.1, eyeY - h * 0.6, cx + d * w * 1.05, eyeY + h * 0.25);
+      ctx.bezierCurveTo(cx + d * w * 1.0, eyeY + h * 1.05, cx - d * w * 0.6, eyeY + h * 1.0, cx - d * w * 0.95, eyeY + h * 0.2);
+      ctx.closePath();
+      ctx.fill();
     }
-    const mouthH = s * (0.075 + stare * 0.06 + Math.sin(t * 1.3) * 0.01);
-    ctx.beginPath(); ctx.ellipse(0, -s * 0.03 + stare * s * 0.02, s * (0.05 + stare * 0.015), mouthH, 0, 0, Math.PI * 2); ctx.fill();
-    if (lid < 0.3) return;
-    // Pupils: centred in the sockets reads as "looking at you"; a small
-    // shift towards the middle of the screen makes them follow the room.
-    const look = Math.max(-1, Math.min(1, (this.W * 0.5 - x) / (this.W * 0.4)));
-    const px = look * rx * 0.25, py = ry * 0.08;
-    const vis = g.vis * (1 - L * 0.3);
-    const pr = s * (0.022 + stare * 0.008);
-    for (const d of [-1, 1]) {
-      const cx = d * ex + px, cy = eyeY + py;
-      ctx.globalAlpha = Math.min(1, vis * (0.75 + stare * 0.25));
-      ctx.fillStyle = '#eaf6ff';
-      ctx.beginPath(); ctx.ellipse(cx, cy, pr, pr * 1.15 * lid, 0, 0, Math.PI * 2); ctx.fill();
-    }
-    ctx.globalCompositeOperation = 'lighter';
-    const R = s * (0.16 + stare * 0.08) * (0.92 + 0.08 * Math.sin(t * 5));
-    for (const d of [-1, 1]) {
-      ctx.globalAlpha = Math.min(1, vis * (0.55 + stare * 0.45));
-      ctx.drawImage(this.ghostEyeGlow, d * ex + px - R, eyeY + py - R, R * 2, R * 2);
-    }
-    ctx.globalCompositeOperation = 'source-over';
+    const mouthH = s * (0.075 + stare * 0.05 + Math.sin(t * 1.3) * 0.01);
+    ctx.beginPath(); ctx.ellipse(0, -s * 0.03 + stare * s * 0.02, s * (0.05 + stare * 0.012), mouthH, 0, 0, Math.PI * 2); ctx.fill();
   }
 
   // Sky layer: witch and bats, with a faint moonlit glow so they stand out.
