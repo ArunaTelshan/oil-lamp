@@ -39,6 +39,10 @@ export const CONFIG = {
   BLOCKED_PARTS: ['FUCK', 'CUNT', 'NIGG'],
 
   NICK_MAX: 6,
+
+  // Local/demo testing only: the lake opens when this % of guests joined.
+  // (The real event uses settings.start_at_percent in Supabase.)
+  START_AT_PERCENT: 90,
 };
 
 export function isConfigured() {

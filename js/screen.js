@@ -4,7 +4,7 @@ import { makeSlots, makeOrder, wordTargets, wordSpacing, matchTargets, HORIZON }
 import { makeGlow, GLOW_WARM, wobble, drawFlame, drawLampBody, drawWaterContact, drawReflection, wickPos } from './lamp-art.js';
 import { Scene } from './scene.js';
 import { LakeAudio } from './audio.js';
-import { backendMode, watchLamps, watchShakes, loadTotal } from './backend.js';
+import { backendMode, watchLamps, watchShakes, loadTotal, getState, watchState, setPhase, recentJoins, joinLake } from './backend.js';
 
 let N = CONFIG.TOTAL_LAMPS;   // replaced by the number in Supabase settings at start
 const WORD = CONFIG.FINALE_WORD || 'WELCOME';
@@ -521,10 +521,17 @@ function saveQR() {
   try { localStorage.setItem(QR_KEY, JSON.stringify(qrBox)); } catch { /* ignore */ }
 }
 
+// The big QR code on the join screen (centred).
+function qrRectGather() {
+  const size = H * 0.4;
+  const total = size * (1 + QR_PAD * 2);
+  return { x: W / 2 - total / 2, y: H * 0.5 - total / 2, w: total, size };
+}
+
 function buildQR() {
   if (!window.qrcode) { qrCanvas = null; return; }
   const r = qrRect();
-  const px = Math.round(r.size * DPR);
+  const px = Math.round(Math.max(r.size, qrRectGather().size) * DPR);
   if (qrCanvas && Math.abs(px - qrBuiltFor) < 2) return;
   qrBuiltFor = px;
   const qr = window.qrcode(0, 'M');
@@ -550,10 +557,12 @@ function buildQR() {
 }
 
 function drawQR(dt) {
-  const target = qrVisible && !finale ? 1 : 0;
+  const target = (qrVisible || stageMix < 0.99) && !finale ? 1 : 0;
   qrAlpha += (target - qrAlpha) * Math.min(1, dt * 2);
   if (!qrCanvas || qrAlpha < 0.01) return;
-  const r = qrRect();
+  const lr = qrRect(), gr = qrRectGather();
+  const e = ease(stageMix);
+  const r = stageMix >= 1 ? lr : { x: lerp(gr.x, lr.x, e), y: lerp(gr.y, lr.y, e), w: lerp(gr.w, lr.w, e), size: lerp(gr.size, lr.size, e) };
   ctx.save();
   ctx.globalCompositeOperation = 'lighter';
   ctx.globalAlpha = qrAlpha * (0.18 + 0.05 * Math.sin(now * 1.5));
@@ -565,7 +574,7 @@ function drawQR(dt) {
   ctx.globalAlpha = 1;
 
   // Operator-only handles: shown while the mouse is over the QR code.
-  if ((qrHover || qrDrag) && now - lastMouse < 2.5) {
+  if ((qrHover || qrDrag) && now - lastMouse < 2.5 && stageMix >= 1) {
     const hs = Math.max(12, r.w * 0.08);
     ctx.save();
     ctx.strokeStyle = 'rgba(255,226,170,0.9)';
@@ -590,7 +599,7 @@ function drawQR(dt) {
 }
 
 function qrHit(x, y) {
-  if (!qrVisible || finale || qrAlpha < 0.5) return null;
+  if (!qrVisible || finale || qrAlpha < 0.5 || stageMix < 1) return null;
   const r = qrRect();
   const hs = Math.max(12, r.w * 0.08) + 8;
   if (x > r.x + r.w - hs && x < r.x + r.w + 14 && y > r.y + r.w - hs && y < r.y + r.w + 14) return 'resize';
@@ -650,12 +659,188 @@ canvas.addEventListener('dblclick', e => {
   saveQR();
 });
 
+// ---------- Join screen (phase 'gather') ----------
+// Big QR code, live count of guests who have joined, their names drifting up.
+// The lake opens by itself at the threshold, or with L (and L goes back).
+let phase = 'lake', stageMix = 1, joined = 0, startAt = 90, autoOpen = true, legacyDb = false;
+const joinFloaters = [];
+let lastJoinAt = null, toastText = '', toastUntil = 0;
+const OPKEY = 'lol_opkey';
+try {
+  const m = location.hash.match(/key=([A-Za-z0-9]+)/);
+  if (m) { localStorage.setItem(OPKEY, m[1]); history.replaceState(null, '', location.pathname + location.search); }
+} catch { /* ignore */ }
+
+function toast(t) { toastText = t; toastUntil = now + 4.5; }
+
+function applyState(st, instant = false) {
+  if (!st) return;
+  legacyDb = !!st.legacy;
+  if (st.joined != null) joined = st.joined;
+  if (st.start_at) startAt = st.start_at;
+  if (st.auto != null) autoOpen = st.auto;
+  if (st.phase && st.phase !== phase) {
+    const opening = st.phase === 'lake';
+    phase = st.phase;
+    if (instant) stageMix = opening ? 1 : 0;
+    else if (started) {
+      if (opening) { audio.milestone(); ripples.push({ lake: true, t0: now, dur: 5 }); moonPulse = 1; }
+      else audio.whoosh && audio.ctx && audio.whoosh(0, 0.04);
+    }
+  }
+}
+
+async function togglePhase() {
+  const target = phase === 'lake' ? 'gather' : 'lake';
+  let key = '';
+  if (MODE === 'supabase') {
+    try { key = localStorage.getItem(OPKEY) || ''; } catch { /* ignore */ }
+    if (!key) {
+      key = (window.prompt('Operator key (Supabase → Table Editor → operator_secret → key):') || '').trim();
+      if (!key) return;
+    }
+  }
+  let r;
+  try { r = await setPhase(target, key); } catch { r = { ok: false, error: 'network' }; }
+  if (r.ok) {
+    try { if (key) localStorage.setItem(OPKEY, key); } catch { /* ignore */ }
+    applyState({ phase: target, auto: target === 'lake' ? autoOpen : false });
+    toast(target === 'lake' ? 'The lake is open' : 'Back to the join screen (press L to open the lake)');
+  } else if (r.error === 'bad_key') {
+    try { localStorage.removeItem(OPKEY); } catch { /* ignore */ }
+    toast('Wrong operator key — press L to try again');
+  } else if (r.error === 'old_database') {
+    toast('Re-run supabase/schema.sql in Supabase to use the join screen');
+  } else toast('Could not reach Supabase — try again');
+}
+
+function drawGather(dt) {
+  const target = phase === 'lake' ? 1 : 0;
+  stageMix += Math.sign(target - stageMix) * Math.min(Math.abs(target - stageMix), dt / 2.4);
+  const a = 1 - ease(stageMix);
+  if (a < 0.005) { joinFloaters.length = 0; return; }
+  ctx.save();
+  // Dim the lake behind
+  ctx.globalAlpha = 0.66 * a;
+  ctx.fillStyle = '#04030a';
+  ctx.fillRect(0, 0, W, H);
+  ctx.globalAlpha = a;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'alphabetic';
+  // Title
+  const t1 = Math.round(H * 0.085);
+  ctx.font = `${t1}px Creepster, Cinzel, serif`;
+  ctx.shadowColor = 'rgba(255,120,30,0.85)';
+  ctx.shadowBlur = t1 * 0.35;
+  const tg = ctx.createLinearGradient(0, H * 0.13 - t1, 0, H * 0.13);
+  tg.addColorStop(0, '#ffe7a3'); tg.addColorStop(0.6, '#ffaa3c'); tg.addColorStop(1, '#e0561a');
+  ctx.fillStyle = tg;
+  try { ctx.letterSpacing = `${Math.round(t1 * 0.06)}px`; } catch { /* ignore */ }
+  ctx.fillText('Lake of Lights', W / 2, H * 0.13);
+  ctx.shadowBlur = 0;
+  try { ctx.letterSpacing = '0px'; } catch { /* ignore */ }
+  ctx.font = `italic ${Math.round(H * 0.034)}px 'Cormorant Garamond', Georgia, serif`;
+  ctx.fillStyle = 'rgba(243,230,200,0.92)';
+  ctx.fillText('Scan the code with your phone to join', W / 2, H * 0.195);
+
+  // Joined count + progress towards the lake opening
+  const n = Math.round(H * 0.07);
+  const y = H * 0.83;
+  const numTxt = String(joined), restTxt = ` / ${N}`;
+  ctx.font = `${n}px Creepster, Cinzel, serif`;
+  const nw = ctx.measureText(numTxt).width;
+  ctx.font = `${Math.round(n * 0.5)}px Creepster, Cinzel, serif`;
+  const rw = ctx.measureText(restTxt).width;
+  const left = W / 2 - (nw + rw) / 2;
+  ctx.textAlign = 'left';
+  ctx.shadowColor = 'rgba(255,120,30,0.8)';
+  ctx.shadowBlur = n * 0.3;
+  ctx.font = `${n}px Creepster, Cinzel, serif`;
+  ctx.fillStyle = tg;
+  const ng = ctx.createLinearGradient(0, y - n, 0, y);
+  ng.addColorStop(0, '#ffe7a3'); ng.addColorStop(0.6, '#ffaa3c'); ng.addColorStop(1, '#e0561a');
+  ctx.fillStyle = ng;
+  ctx.fillText(numTxt, left, y);
+  ctx.font = `${Math.round(n * 0.5)}px Creepster, Cinzel, serif`;
+  ctx.fillStyle = 'rgba(255,214,150,0.9)';
+  ctx.fillText(restTxt, left + nw, y);
+  ctx.shadowBlur = 0;
+  ctx.textAlign = 'center';
+  ctx.font = `600 ${Math.round(H * 0.015)}px Cinzel, serif`;
+  try { ctx.letterSpacing = `${Math.round(H * 0.005)}px`; } catch { /* ignore */ }
+  ctx.fillStyle = 'rgba(243,230,200,0.75)';
+  ctx.fillText('GUESTS HAVE JOINED', W / 2, y + H * 0.032);
+  try { ctx.letterSpacing = '0px'; } catch { /* ignore */ }
+  // Progress bar with the opening point marked
+  const bw = W * 0.42, bh = Math.max(6, H * 0.008), bx = W / 2 - bw / 2, by = y + H * 0.055;
+  const openAt = Math.ceil((N * startAt) / 100);
+  ctx.fillStyle = 'rgba(255,230,190,0.15)';
+  ctx.beginPath(); ctx.roundRect ? ctx.roundRect(bx, by, bw, bh, bh / 2) : ctx.rect(bx, by, bw, bh); ctx.fill();
+  const fillW = bw * Math.min(1, joined / N);
+  const pg = ctx.createLinearGradient(bx, 0, bx + bw, 0);
+  pg.addColorStop(0, '#e0561a'); pg.addColorStop(1, '#ffd27a');
+  ctx.fillStyle = pg;
+  ctx.shadowColor = 'rgba(255,150,50,0.8)'; ctx.shadowBlur = bh * 2;
+  if (fillW > 0) { ctx.beginPath(); ctx.roundRect ? ctx.roundRect(bx, by, fillW, bh, bh / 2) : ctx.rect(bx, by, fillW, bh); ctx.fill(); }
+  ctx.shadowBlur = 0;
+  if (autoOpen && !legacyDb) {
+    const mx = bx + bw * Math.min(1, openAt / N);
+    ctx.fillStyle = 'rgba(255,240,210,0.9)';
+    ctx.fillRect(mx - 1, by - bh * 0.8, 2, bh * 2.6);
+    ctx.font = `italic ${Math.round(H * 0.022)}px 'Cormorant Garamond', Georgia, serif`;
+    ctx.fillStyle = 'rgba(243,230,200,0.75)';
+    ctx.fillText(`The lake opens when ${openAt} guests have joined`, W / 2, by + H * 0.04);
+  }
+
+  // Names of guests who just joined drift up like embers
+  ctx.textAlign = 'center';
+  const fs = Math.round(H * 0.028);
+  ctx.font = `${fs}px Creepster, Cinzel, serif`;
+  for (let i = joinFloaters.length - 1; i >= 0; i--) {
+    const f = joinFloaters[i];
+    const k = (now - f.t0) / f.life;
+    if (k >= 1) { joinFloaters.splice(i, 1); continue; }
+    const fa = Math.min(1, k * 5) * (1 - k);
+    ctx.globalAlpha = a * fa;
+    ctx.shadowColor = 'rgba(255,140,40,0.9)';
+    ctx.shadowBlur = fs * 0.6;
+    ctx.fillStyle = '#ffd99a';
+    ctx.fillText(f.name, f.x + Math.sin(now * 1.3 + f.ph) * W * 0.008, f.y - k * H * 0.12);
+  }
+  ctx.restore();
+}
+
+function addJoinFloaters(rows) {
+  for (const r of rows) {
+    if (!lastJoinAt || r.joined_at > lastJoinAt) lastJoinAt = r.joined_at;
+    if (phase !== 'gather' || joinFloaters.length > 30) continue;
+    // around the QR code: left or right of it
+    const g = qrRectGather();
+    const side = Math.random() < 0.5 ? -1 : 1;
+    const x = W / 2 + side * (g.w / 2 + W * (0.06 + Math.random() * 0.14));
+    joinFloaters.push({ name: r.nickname, x, y: H * (0.38 + Math.random() * 0.36), t0: now + Math.random() * 0.6, life: 5 + Math.random() * 2, ph: Math.random() * 6 });
+  }
+}
+
+function drawToast() {
+  if (now > toastUntil) return;
+  ctx.save();
+  ctx.globalAlpha = Math.min(1, (toastUntil - now) / 0.6);
+  ctx.font = '15px system-ui, sans-serif';
+  const w = ctx.measureText(toastText).width + 28;
+  ctx.fillStyle = 'rgba(0,0,0,0.75)';
+  ctx.fillRect(16, H - 56, w, 34);
+  ctx.fillStyle = '#f3e6c8';
+  ctx.fillText(toastText, 30, H - 34);
+  ctx.restore();
+}
+
 // ---------- Lamp counter (C to show / hide) ----------
 let showCounter = true;
 try { showCounter = localStorage.getItem('lol_counter') !== 'off'; } catch { /* ignore */ }
 let counterAlpha = 0, counterShown = -1, counterPulse = 0;
 function drawCounter(dt) {
-  const target = showCounter && !finale ? 1 : 0;
+  const target = showCounter && !finale && stageMix > 0.98 ? 1 : 0;
   counterAlpha += (target - counterAlpha) * Math.min(1, dt * 2.5);
   if (litCount !== counterShown) { if (counterShown >= 0) counterPulse = 1; counterShown = litCount; }
   counterPulse = Math.max(0, counterPulse - dt * 2.5);
@@ -714,6 +899,7 @@ helpBtn.addEventListener('click', () => setHelp(!showHelp));
 setInterval(() => {
   if (!showHelp) return;
   document.getElementById('helpStatus').textContent =
+    `Screen: ${phase === 'lake' ? 'the lake' : 'join screen'} · joined ${joined} / ${N}${phase === 'gather' && autoOpen ? ` · opens at ${Math.ceil((N * startAt) / 100)}` : ''}${legacyDb ? ' · (old database: re-run schema.sql)' : ''}\n` +
     `Lamps lit: ${litCount} / ${N} · waiting: ${pending.length} · mode: ${MODE}\n` +
     `${fpsShown} fps · quality ${Math.round(quality * 100)}% · counter ${showCounter ? 'on' : 'off'}\n` +
     `Last lamp check: ${lastLampCheck ? Math.round(now - lastLampCheck) + 's ago' : '—'} · phone shakes: ${shakeStatus}${frameErrors ? ` · frame errors: ${frameErrors}` : ''}\n` +
@@ -876,8 +1062,10 @@ function frameBody() {
   scene.drawMist(ctx, dt, mistAmount, false);
   scene.drawFireflies(ctx, now, 1 - (formed ? 0.5 : 0));
   scene.drawFront(ctx, now);
+  drawGather(dt);
   drawQR(dt);
   drawCounter(dt);
+  drawToast();
   drawOperator();
 }
 
@@ -897,11 +1085,27 @@ function demoShakes() {
   }
   setTimeout(demoShakes, 3000 + Math.random() * 4000);
 }
+// Demo: fake guests first join (join screen), then light lamps once the lake is open.
+let demoJoined = 0;
+function demoJoin() {
+  demoJoined++;
+  const name = DEMO_NAMES[Math.floor(Math.random() * DEMO_NAMES.length)];
+  joinLake(name, 'demo-' + demoJoined).then(r => {
+    addJoinFloaters([{ nickname: name, joined_at: new Date().toISOString() }]);
+    applyState({ phase: r.phase, joined: r.joined });
+  });
+}
 function demoLoop() {
   clearTimeout(demoTimer);
-  if (!demoOn || demoId >= N) return;
-  demoAdd();
+  if (!demoOn) return;
   const fast = params.get('demo') === 'fast';
+  if (phase === 'gather') {
+    if (demoJoined < N) demoJoin();
+    demoTimer = setTimeout(demoLoop, fast ? 60 + Math.random() * 150 : 150 + Math.random() * 500);
+    return;
+  }
+  if (demoId >= N) return;
+  demoAdd();
   demoTimer = setTimeout(demoLoop, fast ? 80 + Math.random() * 300 : 250 + Math.random() * 1300);
 }
 
@@ -929,13 +1133,14 @@ window.addEventListener('keydown', e => {
     showCounter = !showCounter;
     try { localStorage.setItem('lol_counter', showCounter ? 'on' : 'off'); } catch { /* ignore */ }
   }
+  else if (k === 'l') togglePhase();
   else if (k === 'w' && !e.shiftKey) { scene.hw.witch = null; scene.hw.launchWitch(); }
   else if (k === 'k') scene.hw.launchSkeleton();
   else if (k === 'o') scene.hw.owlArrive();
   else if (k === 'b') scene.hw.launchBats();
   else if (k === 'g') scene.hw.launchGhost();
   else if (k === 'r' && e.shiftKey) replayFinale();
-  else if (MODE === 'demo' && k === ' ') { e.preventDefault(); demoAdd(); }
+  else if (MODE === 'demo' && k === ' ') { e.preventDefault(); if (phase === 'gather') demoJoin(); else demoAdd(); }
   else if (MODE === 'demo' && k === 'd') { demoOn = !demoOn; demoLoop(); }
 });
 
@@ -957,11 +1162,19 @@ const modeNote = {
 document.getElementById('mode').textContent = modeNote;
 
 Promise.all([
-  document.fonts ? Promise.all([document.fonts.load('600 40px Cinzel'), document.fonts.load('40px Creepster')]).catch(() => {}) : Promise.resolve(),
+  document.fonts ? Promise.all([document.fonts.load('600 40px Cinzel'), document.fonts.load('40px Creepster'), document.fonts.load('italic 30px "Cormorant Garamond"')]).catch(() => {}) : Promise.resolve(),
   loadTotal().then(setTotal),
+  getState().then(st => applyState(st, true)).catch(() => {}),
 ]).finally(() => {
   if (!SLOTS.length) setTotal(N);
   resize();
+  // Join screen: keep the count and phase up to date, show new names.
+  watchState(st => applyState(st), 1500);
+  recentJoins(null).then(rows => { lastJoinAt = rows.length ? rows[rows.length - 1].joined_at : new Date(0).toISOString(); });
+  setInterval(async () => {
+    if (phase !== 'gather' || lastJoinAt === null) return;
+    addJoinFloaters(await recentJoins(lastJoinAt));
+  }, 1500);
   if (MODE !== 'demo') {
     const watcher = watchLamps({
       onLamps: addLamps,

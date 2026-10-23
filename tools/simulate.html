@@ -20,7 +20,7 @@
 <body>
 <main>
   <h1>Lamp simulator</h1>
-  <p>Fires fake guest taps at the backend, so you can rehearse a burst of guests and check that every tap gets its own lamp.</p>
+  <p>Fake guests join (the join screen counts them), wait until the lake opens, then light their lamps. Use it to rehearse a crowd and check that every guest gets their own lamp.</p>
   <p id="mode"></p>
   <div class="warn" id="warn" hidden>This writes to the <b>live Supabase database</b>. Afterwards, reset it in Supabase → SQL Editor:<br><code>select public.reset_ceremony();</code></div>
   <label for="count">Number of guests</label>
@@ -31,7 +31,7 @@
   <pre id="out">Ready.</pre>
 </main>
 <script type="module">
-  import { backendMode, lightLamp, loadTotal } from '../js/backend.js';
+  import { backendMode, lightLamp, loadTotal, joinLake } from '../js/backend.js';
   const mode = backendMode();
   loadTotal().then(n => { document.getElementById('count').value = n + 10; });
   document.getElementById('mode').textContent = `Mode: ${mode}` + (mode === 'local' ? ' (open ../screen.html?local in this same browser to watch)' : '');
@@ -46,13 +46,14 @@
     const n = +document.getElementById('count').value;
     const secs = +document.getElementById('secs').value;
     btn.disabled = true;
-    const res = { ok: 0, full: 0, other: 0, failed: 0, lamps: [], ms: [] };
+    const res = { ok: 0, full: 0, other: 0, failed: 0, lamps: [], ms: [], joined: 0, waiting: 0 };
     const show = done => {
       const uniq = new Set(res.lamps).size;
       const sorted = [...res.ms].sort((a, b) => a - b);
       const pct = p => sorted.length ? Math.round(sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * p))]) : 0;
       out.textContent =
         `${done ? 'Finished' : 'Running'}: ${res.ok + res.full + res.other + res.failed} / ${n}\n` +
+        `Joined: ${res.joined}   ·   waiting for the lake to open: ${res.waiting}\n` +
         `Lit: ${res.ok}   ·   unique lamp numbers: ${uniq}${uniq !== res.ok ? '  ⚠ DUPLICATES' : ''}\n` +
         `Full: ${res.full}   ·   refused: ${res.other}   ·   network failures: ${res.failed}\n` +
         `Response time: median ${pct(0.5)} ms · 95% ${pct(0.95)} ms · slowest ${pct(1)} ms`;
@@ -61,13 +62,24 @@
     for (let i = 0; i < n; i++) {
       const delay = secs ? Math.random() * secs * 1000 : 0;
       jobs.push(new Promise(r => setTimeout(r, delay)).then(async () => {
-        const t0 = performance.now();
+        const nick = name(), dev = uuid();
         try {
-          const r = await lightLamp(name(), uuid());
-          res.ms.push(performance.now() - t0);
-          if (r.ok) { res.ok++; res.lamps.push(r.lamp); }
-          else if (r.error === 'full') res.full++;
-          else res.other++;
+          const j = await joinLake(nick, dev);
+          if (j.ok) res.joined++;
+          show(false);
+          // Wait for the lake to open (up to 10 minutes), then light the lamp.
+          res.waiting++;
+          for (let tries = 0; tries < 300; tries++) {
+            const t0 = performance.now();
+            const r = await lightLamp(nick, dev);
+            res.ms.push(performance.now() - t0);
+            if (r.error === 'not_yet') { await new Promise(w => setTimeout(w, 2000 + Math.random() * 1000)); continue; }
+            if (r.ok) { res.ok++; res.lamps.push(r.lamp); }
+            else if (r.error === 'full') res.full++;
+            else res.other++;
+            break;
+          }
+          res.waiting--;
         } catch { res.failed++; }
         show(false);
       }));

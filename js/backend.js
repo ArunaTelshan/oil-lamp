@@ -83,6 +83,91 @@ export async function loadTotal() {
   return currentTotal;
 }
 
+// ---------- The join screen: who has joined, and is the lake open? ----------
+// Calls a Supabase function; { missing: true } if the database is an older
+// version without it (then everything behaves as before: the lake is open).
+async function rpc(name, body, ms = 8000) {
+  try {
+    return await getJSON(`${CONFIG.SUPABASE_URL}/rest/v1/rpc/${name}`, {
+      method: 'POST', headers: headers(), body: JSON.stringify(body || {}),
+    }, ms);
+  } catch (e) {
+    if (String(e.message).includes('404')) return { missing: true };
+    throw e;
+  }
+}
+
+// { phase: 'gather'|'lake', total, start_at, auto, joined, lit }
+export async function getState() {
+  if (backendMode() !== 'supabase') return localState();
+  const st = await rpc('lake_state');
+  if (st.missing) return { phase: 'lake', total: currentTotal, start_at: 90, auto: false, joined: null, lit: null, legacy: true };
+  if (st.total) currentTotal = st.total;
+  return st;
+}
+
+// Guest joins with a nickname → { ok, phase, joined, total } or { ok:false, error }.
+export async function joinLake(nickname, device = deviceId()) {
+  if (backendMode() !== 'supabase') return localJoin(nickname, device);
+  const r = await rpc('join_lake', { p_nickname: nickname, p_device: device });
+  if (r.missing) return { ok: true, nickname: cleanNickname(nickname), phase: 'lake', joined: null, total: currentTotal, legacy: true };
+  return r;
+}
+
+export async function joinLakeWithRetry(nickname, onRetry) {
+  const waits = [600, 1000, 1500, 2500, 3500, 5000, 6000, 8000, 10000];
+  let lastErr;
+  for (let i = 0; i <= waits.length; i++) {
+    try { return await joinLake(nickname); } catch (e) {
+      lastErr = e;
+      if (i === waits.length) break;
+      onRetry && onRetry(i + 1);
+      await new Promise(r => setTimeout(r, waits[i]));
+    }
+  }
+  throw lastErr;
+}
+
+// Big screen: open the lake / back to the join screen (needs the operator key).
+export async function setPhase(phase, key) {
+  if (backendMode() !== 'supabase') {
+    store.set(SKEY, { phase, auto: phase === 'lake' });
+    channel && channel.postMessage({ type: 'state' });
+    return { ok: true, phase };
+  }
+  const r = await rpc('set_phase', { p_key: key || '', p_phase: phase });
+  if (r.missing) return { ok: false, error: 'old_database' };
+  return r;
+}
+
+// Nicknames that joined after `since` (ISO time), oldest first.
+export async function recentJoins(since) {
+  if (backendMode() !== 'supabase') {
+    return store.get(PKEY, []).filter(p => !since || p.joined_at > since).map(({ nickname, joined_at }) => ({ nickname, joined_at }));
+  }
+  const base = `${CONFIG.SUPABASE_URL}/rest/v1/participants?select=nickname,joined_at`;
+  const url = since ? `${base}&joined_at=gt.${encodeURIComponent(since)}&order=joined_at.asc&limit=60` : `${base}&order=joined_at.desc&limit=12`;
+  try {
+    const rows = await getJSON(url, { headers: headers(), cache: 'no-store' });
+    return since ? rows : rows.reverse();
+  } catch { return []; }
+}
+
+// Calls onState(state) every `ms` (each check times out, never piles up).
+export function watchState(onState, ms = 1500) {
+  let stopped = false, busy = false;
+  const tick = async () => {
+    if (stopped || busy) return;
+    busy = true;
+    try { onState(await getState()); } catch { /* try again next time */ }
+    busy = false;
+  };
+  tick();
+  const iv = setInterval(tick, ms);
+  if (channel) channel.addEventListener('message', e => { if (e.data && (e.data.type === 'state' || e.data.type === 'reset')) tick(); });
+  return { stop() { stopped = true; clearInterval(iv); }, now: tick };
+}
+
 // ---------- Guest: light a lamp ----------
 // Returns { ok, lamp, nickname, repeat, total } or { ok:false, error }.
 // Network failures throw, so the caller can retry.
@@ -182,11 +267,46 @@ export function watchLamps({ onLamps, onStatus, onReset }) {
 }
 
 // ---------- Local stand-in (same browser, for testing) ----------
-const LKEY = 'lol_local_lamps';
+// ?local keeps everything in localStorage (guest + screen tabs share it);
+// ?demo keeps it in memory (the screen plays on its own).
+const LKEY = 'lol_local_lamps', PKEY = 'lol_local_people', SKEY = 'lol_local_phase';
 const channel = 'BroadcastChannel' in window ? new BroadcastChannel('lake-of-lights') : null;
+const mem = {};
+const store = {
+  get(k, d) {
+    if (backendMode() === 'demo') return k in mem ? mem[k] : d;
+    try { const v = JSON.parse(localStorage.getItem(k) || 'null'); return v == null ? d : v; } catch { return d; }
+  },
+  set(k, v) {
+    if (backendMode() === 'demo') mem[k] = v;
+    else try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* ignore */ }
+  },
+};
+const startAtDefault = () => Number(params.get('startat')) || CONFIG.START_AT_PERCENT || 90;
 
-function readLocal() {
-  try { return JSON.parse(localStorage.getItem(LKEY) || '[]'); } catch { return []; }
+function readLocal() { return store.get(LKEY, []); }
+
+function localState() {
+  const st = store.get(SKEY, { phase: 'gather', auto: true });
+  return { phase: st.phase, auto: st.auto, total: currentTotal, start_at: startAtDefault(), joined: store.get(PKEY, []).length, lit: readLocal().length };
+}
+
+async function localJoin(nickname, device) {
+  if (backendMode() !== 'demo') await new Promise(r => setTimeout(r, 200 + Math.random() * 300));
+  const nick = cleanNickname(nickname);
+  if (!nick) return { ok: false, error: 'bad_nickname' };
+  if (isBlocked(nick)) return { ok: false, error: 'blocked_nickname' };
+  const people = store.get(PKEY, []);
+  const me = people.find(p => p.device_id === device);
+  if (me) me.nickname = nick; else people.push({ device_id: device, nickname: nick, joined_at: new Date().toISOString() });
+  store.set(PKEY, people);
+  const st = store.get(SKEY, { phase: 'gather', auto: true });
+  if (st.phase === 'gather' && st.auto && people.length >= Math.ceil(currentTotal * startAtDefault() / 100)) {
+    st.phase = 'lake';
+    store.set(SKEY, st);
+  }
+  channel && channel.postMessage({ type: 'state' });
+  return { ok: true, nickname: nick, phase: st.phase, joined: people.length, total: currentTotal };
 }
 
 async function localLight(nickname, device) {
@@ -197,16 +317,22 @@ async function localLight(nickname, device) {
   const lamps = readLocal();
   const mine = lamps.find(l => l.device_id === device);
   if (mine) return { ok: true, lamp: mine.id, nickname: mine.nickname, repeat: true, total: currentTotal };
+  if (localState().phase !== 'lake') return { ok: false, error: 'not_yet', total: currentTotal };
   if (lamps.length >= currentTotal) return { ok: false, error: 'full', total: currentTotal };
+  const people = store.get(PKEY, []);
+  if (!people.some(p => p.device_id === device)) {
+    people.push({ device_id: device, nickname: nick, joined_at: new Date().toISOString() });
+    store.set(PKEY, people);
+  }
   const lamp = { id: lamps.length + 1, nickname: nick, device_id: device };
   lamps.push(lamp);
-  localStorage.setItem(LKEY, JSON.stringify(lamps));
+  store.set(LKEY, lamps);
   channel && channel.postMessage({ type: 'lamp' });
   return { ok: true, lamp: lamp.id, nickname: nick, repeat: false, total: currentTotal };
 }
 
 export function resetLocal() {
-  localStorage.removeItem(LKEY);
+  for (const k of [LKEY, PKEY, SKEY]) { if (backendMode() === 'demo') delete mem[k]; else localStorage.removeItem(k); }
   channel && channel.postMessage({ type: 'reset' });
 }
 

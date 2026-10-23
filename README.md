@@ -6,6 +6,20 @@ A digital lamp-lighting ceremony (140 guests by default, adjustable without code
 - **Big screen:** `screen.html`.
 - **Backend:** Supabase (a free online database), which hands out lamp numbers one at a time.
 
+### How the evening flows
+1. **Join screen:** the big screen shows a large QR code, the title and a live count ("57 / 140 guests have joined"), with each joiner's name drifting up.
+   Guests scan, choose a nickname and see *"You're on the guest list ✦"* with the live count, and their lamp waits unlit.
+2. **The lake opens:**
+   - by itself, when 90% of guests have joined (adjustable), or
+   - when you press **L** on the screen. Press **L** again to go back to the join screen.
+
+   Every waiting phone wakes up with a chime and vibration, ready to light.
+3. **Lighting:** guests press and hold to light, then swipe up. Their lamp floats onto the lake with their nickname.
+   The keepsake card invites them to *"give your phone a gentle shake, and watch your lamp dance on the lake"*.
+4. **Finale:** when every lamp is lit, the lamps drift together to spell **WELCOME**.
+
+Guests who arrive after the lake has opened skip the waiting and light straight away.
+
 ### What's on the big screen
 - **Scene:** a misty, moonlit lake framed by two gnarled, claw-branched trees. One branch crosses the moon.
 - **Lights:** jack-o'-lanterns glow on the near bank, smaller ones dot the far shore, and a haunted house there has flickering windows.
@@ -32,6 +46,23 @@ A digital lamp-lighting ceremony (140 guests by default, adjustable without code
 3. The project URL and publishable key are already in [`js/config.js`](js/config.js).
 
 **Never put the secret key (`sb_secret_...`) or the `service_role` key in this repo.** The publishable key is designed to be public. The database rules only let guests light a lamp through the `light_lamp` function, so nobody can edit or delete lamps directly.
+
+### The operator key (for the L key)
+Opening the lake by hand (or going back) needs a short key, so a guest can't do it.
+- Find it in Supabase → **Table Editor** → `operator_secret` → `key` (6 characters, made automatically).
+- On the big screen, press **L** and type it once. The laptop remembers it.
+  Or open the screen as `…/screen.html#key=ABC123` (replace ABC123 with your key).
+- The automatic opening at the threshold needs no key.
+
+### Join screen settings (Supabase → Table Editor → `settings`)
+| Column | What it does |
+|---|---|
+| `total_lamps` | Number of guests / lamps (1–500) |
+| `start_at_percent` | The lake opens by itself when this % of guests have joined (default 90) |
+| `phase` | `gather` = join screen, `lake` = lake open. The L key changes it |
+| `auto_open` | Turns off when you go back to the join screen by hand. Pressing L or resetting turns it on again |
+
+`select public.reset_ceremony();` clears all lamps and joined guests and returns to the join screen.
 
 ### Changing the number of guests (no code needed)
 The number of lamps lives in Supabase, not in the code:
@@ -69,6 +100,7 @@ The QR code on the big screen is generated automatically and points to the guest
    Try shaking each phone on the keepsake card: the flame should sway. On iPhone, the phone asks for "Motion & Orientation" access. Tap **Allow**. If the card says "Tap here, then gently shake", tap that line first.
    While shaking, the guest's lamp on the big screen should flutter. Press `H` on the screen: "Phone shakes: connected" means the live link works.
    If shaking does nothing on a phone, open `https://arunatelshan.github.io/oil-lamp/?debug` on it. Green text at the top shows whether motion readings arrive.
+   Also test the join screen: scan, join, and check that the screen's count goes up. Then press **L** and check that the phones wake up.
 4. **Burst test (optional):** open `https://arunatelshan.github.io/oil-lamp/tools/simulate.html` on the laptop. It fires 140 fake guests at the live database and reports whether every lamp number was unique.
    - Watch the screen do the full WELCOME finale.
    - Then **reset** (step 1) and reload the screen.
@@ -84,7 +116,7 @@ A phone normally lights only one lamp. For testing, tap the **moon** on the phon
 - Everything else keeps working even if this link is down.
 
 ### Testing without Supabase
-- `screen.html?demo` plays the whole ceremony with fake guests, with no internet needed. This is also your **backup if the connection fails on the night**. Use `screen.html?demo=fast` for a quicker run.
+- `screen.html?demo` plays the whole ceremony with fake guests, join screen included, with no internet needed. This is also your **backup if the connection fails on the night**. Use `screen.html?demo=fast` for a quicker run.
 - `screen.html?local` together with `index.html?local` (same browser, two tabs) lets you test the real guest flow on one computer.
 
 ---
@@ -100,6 +132,7 @@ Move the mouse and a small **?** appears on the left edge. Click it (or press `H
 
 | Key | What it does |
 |---|---|
+| `L` | Open the lake now / go back to the join screen (asks once for the operator key) |
 | `F` | Fullscreen on/off |
 | `C` | Show/hide the lamp counter ("37 / 140 · lamps lit", top centre; it fades out for the finale). Remembered on this laptop |
 | `Q` | Show/hide the QR code |

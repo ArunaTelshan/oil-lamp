@@ -2,7 +2,7 @@
 import { CONFIG } from './config.js';
 import { makeSlots, makeOrder, HORIZON } from './layout.js';
 import { makeGlow, GLOW_WARM, wobble, drawFlame, drawLampBody, wickPos } from './lamp-art.js';
-import { backendMode, cleanNickname, isBlocked, lightLampWithRetry, sendShake, shakeStats, notifyLit, loadTotal, total } from './backend.js';
+import { backendMode, cleanNickname, isBlocked, lightLampWithRetry, sendShake, shakeStats, notifyLit, loadTotal, total, joinLakeWithRetry, watchState } from './backend.js';
 
 const app = document.getElementById('app');
 const stage = document.getElementById('stage');
@@ -16,6 +16,7 @@ const glow = makeGlow(128, GLOW_WARM);
 const ember = makeGlow(64, [[0, 'rgba(255,250,220,1)'], [0.25, 'rgba(255,200,110,0.7)'], [1, 'rgba(255,120,30,0)']]);
 
 const KEEP = 'lol_keepsake';
+const JOINED = 'lol_joined';
 const debugEl = document.getElementById('debug');
 const MODE = backendMode();
 if (MODE !== 'supabase') document.getElementById('localNote').hidden = false;
@@ -90,8 +91,57 @@ continueBtn.addEventListener('click', () => {
   nickInput.blur();
   enableMotion();   // must happen inside a tap for iPhones
   initAudio();
-  setStep('light');
+  join();
 });
+
+// ---------- Join the lake, then wait for it to open ----------
+let retryAction = null, stateWatch = null;
+async function join() {
+  setStep('joining');
+  document.getElementById('joiningNote').textContent = 'Just a moment.';
+  let r;
+  try {
+    r = await joinLakeWithRetry(nickname, n => {
+      if (n >= 2) document.getElementById('joiningNote').textContent = 'Weak signal — still trying…';
+    });
+  } catch {
+    retryAction = join;
+    setStep('offline');
+    return;
+  }
+  if (!r.ok) {
+    nickError.textContent = r.error === 'blocked_nickname' ? 'Please choose a different name.' : 'Please use letters only.';
+    setStep('name');
+    return;
+  }
+  nickname = r.nickname || nickname;
+  try { localStorage.setItem(JOINED, JSON.stringify({ nickname })); } catch { /* ignore */ }
+  if (r.phase === 'lake') setStep('light');
+  else wait(r);
+}
+
+function showJoined(st) {
+  const el = document.getElementById('joinedLine');
+  if (st && st.joined != null) el.innerHTML = `<b>${st.joined}</b> of ${st.total} guests have joined`;
+}
+
+function wait(first) {
+  document.getElementById('wName').textContent = nickname;
+  setStep('waiting');
+  showJoined(first);
+  stateWatch && stateWatch.stop();
+  stateWatch = watchState(st => {
+    showJoined(st);
+    if (st.phase === 'lake' && step === 'waiting') {
+      stateWatch.stop();
+      stateWatch = null;
+      // The lake is open: wake the guest up.
+      chime([523.25, 659.25, 783.99, 1046.5], 0.06);
+      if (navigator.vibrate) navigator.vibrate([60, 60, 120]);
+      setStep('light');
+    }
+  }, 2000);
+}
 
 // ---------- Motion (shake the flame) ----------
 // Uses the plain accelerometer (every phone has one) and removes gravity
@@ -231,7 +281,7 @@ stage.addEventListener('pointermove', e => {
   }
 });
 document.getElementById('releaseBtn').addEventListener('click', () => release());
-document.getElementById('retryBtn').addEventListener('click', () => release(true));
+document.getElementById('retryBtn').addEventListener('click', () => (retryAction || (() => release(true)))());
 
 async function release(isRetry = false) {
   if (step !== 'release' && !isRetry) return;
@@ -251,6 +301,7 @@ async function release(isRetry = false) {
     });
   } catch {
     await minAnim;
+    retryAction = () => release(true);
     setStep('offline');
     return;
   }
@@ -260,6 +311,11 @@ async function release(isRetry = false) {
     const keep = { lamp: result.lamp, nickname: result.nickname, time: Date.now(), total: result.total || total() };
     try { localStorage.setItem(KEEP, JSON.stringify(keep)); } catch { /* ignore */ }
     showKeepsake(keep);
+  } else if (result.error === 'not_yet') {
+    // The lake was closed again: back to waiting.
+    fly = { t0: now, dir: 'down' };
+    flameK = 0; hold = 0;
+    wait(null);
   } else if (result.error === 'full') {
     fly = { t0: now, dir: 'down' };
     setStep('full');
@@ -454,6 +510,16 @@ function frame() {
 
   drawLampBody(ctx, L.x - (L.s - s) * 0.4, ly, s, 0.2 + 0.8 * flameK, 1);
 
+  // A faint ember breathes at the wick while waiting for the lake
+  if (step === 'waiting' && flameK === 0) {
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    const es = s * 0.14 * (0.8 + 0.2 * Math.sin(now * 2.2));
+    ctx.globalAlpha = 0.35 + 0.25 * Math.sin(now * 2.2);
+    ctx.drawImage(ember, w.x - es / 2, w.y - es / 2, es, es);
+    ctx.restore();
+  }
+
   // Ember while holding
   if (flameK === 0 && hold > 0) {
     ctx.save();
@@ -505,7 +571,9 @@ function frame() {
 // Tap the moon 5 times quickly (or open the page with ?new). The phone
 // forgets its lamp and gets a fresh identity, so it can light a new one.
 function startOver() {
-  try { localStorage.removeItem(KEEP); localStorage.removeItem('lol_device'); } catch { /* ignore */ }
+  try { localStorage.removeItem(KEEP); localStorage.removeItem('lol_device'); localStorage.removeItem(JOINED); } catch { /* ignore */ }
+  stateWatch && stateWatch.stop();
+  stateWatch = null;
   myLamp = 0; nickname = ''; flameK = 0; flare = 0; hold = 0; fly = null; lift = 0;
   nickInput.value = '';
   nickError.textContent = '';
@@ -526,7 +594,7 @@ window.addEventListener('pointerdown', e => {
 function init() {
   loadTotal().then(() => { if (step === 'done') drawMap(); });
   if (new URLSearchParams(location.search).has('new')) {
-    try { localStorage.removeItem(KEEP); localStorage.removeItem('lol_device'); } catch { /* ignore */ }
+    try { localStorage.removeItem(KEEP); localStorage.removeItem('lol_device'); localStorage.removeItem(JOINED); } catch { /* ignore */ }
   }
   resize();
   attachMotion();
@@ -540,8 +608,17 @@ function init() {
     // iPhones only allow motion after a tap: ask on the first tap anywhere.
     if (needsPermission()) window.addEventListener('click', () => enableMotion(), { once: true });
   } else {
-    setStep('name');
-    updateContinue();
+    let joined = null;
+    try { joined = JSON.parse(localStorage.getItem(JOINED) || 'null'); } catch { /* ignore */ }
+    if (joined && joined.nickname) {
+      // Already joined on this phone: re-join quietly (same phone = same guest).
+      nickname = joined.nickname;
+      window.addEventListener('click', () => { enableMotion(); initAudio(); }, { once: true });
+      join();
+    } else {
+      setStep('name');
+      updateContinue();
+    }
   }
   requestAnimationFrame(frame);
 }

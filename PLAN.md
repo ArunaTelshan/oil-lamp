@@ -159,7 +159,8 @@ README.md           Setup + event-day checklist
 - [x] Shake mirroring: a guest's shake makes their own lamp flutter on the big screen
 - [x] Hidden "light another lamp" on the phone (tap the moon 5×, or `?new`)
 - [x] Guest count set in Supabase (`settings.total_lamps`), no code change; tea-lights complete WELCOME for small groups
-- [ ] Owner: re-run `supabase/schema.sql` (adds the settings table)
+- [x] Join screen: big QR + live joined count, lake opens at 90% or with L (and back); phones wait, then wake up to light
+- [ ] Owner: re-run `supabase/schema.sql` (adds settings, guest list, join screen and operator key)
 - [ ] Owner: run `supabase/schema.sql` in the Supabase SQL Editor
 - [ ] Owner: enable GitHub Pages
 - [ ] Rehearse with real phones on mobile data, on the real laptop and projector

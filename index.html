@@ -45,6 +45,20 @@
         <button id="continue" class="btn" disabled>Continue</button>
       </div>
 
+      <!-- Joining (a moment) -->
+      <div class="step" data-for="joining">
+        <h2>Joining the lake…</h2>
+        <p class="sub" id="joiningNote">Just a moment.</p>
+      </div>
+
+      <!-- Waiting for the lake to open -->
+      <div class="step" data-for="waiting">
+        <div class="w-name" id="wName">NIMA</div>
+        <h2>You're on the guest list ✦</h2>
+        <p class="sub">Keep this page open. When the lake appears on the big screen, your lamp will be ready to light.</p>
+        <p class="joined" id="joinedLine" aria-live="polite"></p>
+      </div>
+
       <!-- 2. Hold to light -->
       <div class="step" data-for="light">
         <h2>Press &amp; hold the lamp</h2>
@@ -73,6 +87,7 @@
           <canvas id="map" aria-label="Where your lamp floats on the lake"></canvas>
           <p class="k-find">Find your light on the lake</p>
         </div>
+        <p class="shake-note">Give your phone a gentle shake, and watch your lamp dance on the lake ✦</p>
       </div>
 
       <!-- All lamps already lit -->
