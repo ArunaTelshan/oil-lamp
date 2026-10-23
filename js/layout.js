@@ -39,6 +39,7 @@ export function makeSlots(seed, n) {
     const x = margin + rand() * (1 - 2 * margin);
     if (x > 0.80 && y > 0.74) continue; // QR panel area
     if (x < 0.27 && y > 0.82) continue; // pumpkin bank (bottom-left)
+    if (x > 0.62 && y > 0.88) continue; // pumpkin bank (bottom-right)
     let ok = true;
     for (const p of pts) {
       const dx = (x - p.x) * aspect;
@@ -187,11 +188,21 @@ export function wordTargets(word, n, W, H) {
   unitPts.length = 0;
   unitPts.push(...kept);
 
-  // Fit the word on the lake.
-  const unit = Math.min((W * 0.8) / wordW, H * 0.2);
-  const ox = (W - wordW * unit) / 2;
-  const oy = H * 0.705 - unit / 2;
-  return unitPts.map(([x, y]) => ({ x: ox + x * unit, y: oy + y * unit }));
+  // Lay the word flat on the water, in perspective: the top of the letters
+  // is further away (narrower, smaller lamps), the bottom is closer (wider,
+  // bigger lamps). k = lamp size factor at that spot (1 = nearest row).
+  const D_FAR = 1.2;                 // how much further the top of the letters is
+  const hyEff = -H * 0.2;            // gentle tilt: the word stays easy to read
+  const yNear = H * 0.84;            // bottom of the letters
+  const nearW = Math.min(W * 0.84, H * 1.25);
+  return unitPts.map(([x, y]) => {
+    const d = D_FAR + (1 - D_FAR) * y;          // y: 0 top (far) … 1 bottom (near)
+    return {
+      x: W / 2 + (x / wordW - 0.5) * nearW / d,
+      y: hyEff + (yNear - hyEff) / d,
+      k: 1 / d,
+    };
+  });
 }
 
 // Spacing between neighbouring lamps in the formation (pixels).

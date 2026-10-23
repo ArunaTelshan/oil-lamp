@@ -10,6 +10,7 @@ import { makeGlow, GLOW_WARM, wobble } from './lamp-art.js';
 const SIL = '#020205';      // silhouette colour
 const lerp = (a, b, t) => a + (b - a) * t;
 const clamp01 = v => Math.max(0, Math.min(1, v));
+const ease3 = t => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
 
 // ---------- Trees ----------
 let BOUNDS = null;   // while set, every stroke grows this box (to crop branch layers)
@@ -543,6 +544,7 @@ export class Halloween {
     this.ghost = null; this.nextGhost = 45 + Math.random() * 30;
     this.owls = []; this.nextOwl = 12 + Math.random() * 10;
     this.skel = null; this.nextSkel = 100 + Math.random() * 50;
+    this.spiders = []; this.nextSpider = 12 + Math.random() * 15;
     this.splash = null;
     this.onEvent = null;     // (name) → screen plays a sound
     this.enabled = true;     // false during the finale (no new flying characters)
@@ -590,11 +592,48 @@ export class Halloween {
     }
     this.bank = { canvas: bank, x: bx0, y: by };
 
+    // A second bank at the bottom-right with more jack-o'-lanterns.
+    const rb = document.createElement('canvas');
+    const rx0 = Math.floor(W * 0.6);
+    rb.width = Math.ceil(W * 0.46); rb.height = Math.ceil(H * 0.14);
+    const rg = rb.getContext('2d');
+    const ry = H * 0.86;
+    rg.translate(-rx0, -ry);
+    rg.fillStyle = SIL;
+    rg.beginPath();
+    rg.moveTo(W * 0.62, H + 2);
+    rg.bezierCurveTo(W * 0.68, H * 0.97, W * 0.76, H * 0.945, W * 0.86, H * 0.93);
+    rg.bezierCurveTo(W * 0.95, H * 0.92, W * 1.0, H * 0.915, W * 1.06, H * 0.915);
+    rg.lineTo(W * 1.06, H + 2);
+    rg.closePath();
+    rg.fill();
+    rg.strokeStyle = SIL;
+    rg.lineCap = 'round';
+    for (let i = 0; i < 70; i++) {
+      const x = W * (0.64 + r() * 0.42);
+      const yTop = (x < W * 0.86 ? H * (1 - (x - W * 0.62) / (W * 0.24) * 0.07) : H * 0.925) + 2;
+      const h = H * (0.012 + r() * 0.028);
+      rg.lineWidth = 1 + r() * 1.6;
+      rg.beginPath();
+      rg.moveTo(x, yTop + 3);
+      rg.quadraticCurveTo(x + (r() - 0.5) * h * 0.4, yTop - h * 0.6, x + (r() - 0.5) * h * 0.8, yTop - h);
+      rg.stroke();
+    }
+    this.rbank = { canvas: rb, x: rx0, y: ry };
+
     this.pumpkins = [
+      { x: W * 0.012, y: H * 0.878, ...renderPumpkin(H * 0.04, 2, 2) },
       { x: W * 0.045, y: H * 0.905, ...renderPumpkin(H * 0.045, 1, 3) },
       { x: W * 0.105, y: H * 0.952, ...renderPumpkin(H * 0.085, 0, 5) },
       { x: W * 0.19, y: H * 0.978, ...renderPumpkin(H * 0.056, 2, 8) },
+      { x: W * 0.238, y: H * 0.997, ...renderPumpkin(H * 0.036, 1, 9) },
+      // right side
+      { x: W * 0.7, y: H * 0.995, ...renderPumpkin(H * 0.046, 2, 11) },
+      { x: W * 0.765, y: H * 0.982, ...renderPumpkin(H * 0.07, 0, 13) },
+      { x: W * 0.818, y: H * 0.962, ...renderPumpkin(H * 0.036, 1, 17) },
     ].map((p, i) => ({ ...p, seed: i * 7.3 }));
+
+    this.web = this.renderWeb(W, H);
 
     // Tiny jack-o'-lanterns along the far shore
     this.farPumpkins = [0.21, 0.37, 0.505, 0.6, 0.885].map((fx, i) => {
@@ -610,6 +649,39 @@ export class Halloween {
       ax: W * (0.03 + wr() * 0.06), ay: H * (0.01 + wr() * 0.02),
       fx: 0.03 + wr() * 0.05, fy: 0.05 + wr() * 0.07, ph: wr() * 6.28, pf: 0.2 + wr() * 0.4,
     }));
+  }
+
+  // A cobweb in one of the top corners, among the branches.
+  renderWeb(W, H) {
+    const right = Math.random() < 0.5;
+    const R = H * (0.16 + Math.random() * 0.05);
+    const c = document.createElement('canvas');
+    c.width = c.height = Math.ceil(R * 1.15);
+    const g = c.getContext('2d');
+    g.strokeStyle = 'rgba(220,226,245,0.5)';
+    g.lineWidth = 1;
+    const spokes = 8;
+    const ang = i => (i / (spokes - 1)) * Math.PI / 2;
+    for (let i = 0; i < spokes; i++) {
+      g.beginPath(); g.moveTo(0, 0); g.lineTo(Math.cos(ang(i)) * R, Math.sin(ang(i)) * R); g.stroke();
+    }
+    const glints = [];
+    for (let k = 1; k <= 10; k++) {
+      const rr = (R * k) / 10.5;
+      g.globalAlpha = 0.35 + 0.4 * (k / 10);
+      g.beginPath();
+      for (let i = 0; i < spokes; i++) {
+        const a = ang(i), x = Math.cos(a) * rr, y = Math.sin(a) * rr;
+        if (i === 0) g.moveTo(x, y);
+        else {
+          const am = (ang(i - 1) + a) / 2, sag = rr * 0.88;    // threads sag between spokes
+          g.quadraticCurveTo(Math.cos(am) * sag, Math.sin(am) * sag, x, y);
+        }
+        if (Math.random() < 0.25) glints.push([x, y, Math.random() * 6.28]);
+      }
+      g.stroke();
+    }
+    return { canvas: c, right, glints, R };
   }
 
   // Top edge of the near bank at x (same curve as the drawn bank).
@@ -674,6 +746,24 @@ export class Halloween {
   }
 
   // ---------- Skeleton ----------
+  spawnSpider() {
+    const { W, H } = this;
+    const sp = { t: 0, down: 5 + Math.random() * 3, pause: 4 + Math.random() * 5, up: 5, len: H * (0.1 + Math.random() * 0.2), s: H * (0.016 + Math.random() * 0.008), ph: Math.random() * 6 };
+    // Hang from a high branch point of a foreground tree, or from the top edge.
+    const cands = [];
+    for (const [tree, side] of [[this.left, 'left'], [this.right, 'right']]) {
+      tree.limbs.forEach((L, idx) => {
+        for (let i = 4; i < L.path.length; i += 6) {
+          const [x, y] = L.path[i];
+          if (y > H * 0.04 && y < H * 0.36 && x > W * 0.05 && x < W * 0.95 && Math.hypot(x - this.moon.x, y - this.moon.y) > this.moon.r * 1.6) cands.push({ side, limb: idx, x, y });
+        }
+      });
+    }
+    if (cands.length && Math.random() < 0.7) Object.assign(sp, cands[Math.floor(Math.random() * cands.length)]);
+    else Object.assign(sp, { top: true, x: W * (0.15 + Math.random() * 0.7), y: -4 });
+    this.spiders.push(sp);
+  }
+
   launchSkeleton() {
     if (this.skel) return;
     this.skel = { t: 0, x0: this.W * 0.07, edge: this.W * 0.215, phase: 0 };
@@ -732,6 +822,20 @@ export class Halloween {
       }
     }
 
+    this.updateGhost(dt);
+
+    // Spiders: one or two drop down now and then at random spots.
+    for (let i = this.spiders.length - 1; i >= 0; i--) {
+      const sp = this.spiders[i];
+      sp.t += dt;
+      if (sp.t > sp.down + sp.pause + sp.up) this.spiders.splice(i, 1);
+    }
+    this.nextSpider -= dt;
+    if (this.nextSpider <= 0) {
+      this.nextSpider = 18 + Math.random() * 30;
+      if (this.spiders.length < 2) this.spawnSpider();
+    }
+
     // Skeleton
     if (this.skel) {
       const s = this.skel;
@@ -781,17 +885,171 @@ export class Halloween {
     this.nextBats = 30 + Math.random() * 30;
   }
 
+  // The witch flies a different way each time:
+  //  across   — over the sky, past the moon, growing a little as she comes closer
+  //  approach — from far away near the horizon, swooping towards the audience
+  //  orbit    — circles the moon, then flies off into the night
   launchWitch() {
     if (this.witch) return;
-    const ltr = Math.random() < 0.7;
-    this.witch = { t: 0, dur: 11, ltr };
-    this.nextWitch = 200 + Math.random() * 120;
+    const { W, H } = this;
+    const r = Math.random();
+    const w = { t: 0, kind: r < 0.4 ? 'across' : r < 0.8 ? 'approach' : 'orbit' };
+    if (w.kind === 'across') {
+      w.dur = 10 + Math.random() * 3; w.ltr = Math.random() < 0.6;
+      w.y0 = H * (0.15 + Math.random() * 0.2); w.amp = H * (0.03 + Math.random() * 0.05);
+      w.s0 = H * (0.07 + Math.random() * 0.045); w.grow = 1.15 + Math.random() * 0.4;
+    } else if (w.kind === 'approach') {
+      w.dur = 7.5 + Math.random() * 2.5;
+      w.sx = W * (0.3 + Math.random() * 0.4); w.sy = H * (0.3 + Math.random() * 0.07);
+      const side = Math.random() < 0.5 ? -1 : 1;
+      w.ex = side > 0 ? W * 1.3 : -W * 0.3; w.ey = H * (0.05 + Math.random() * 0.3);
+      w.cx = w.sx + side * W * 0.18; w.cy = H * (0.14 + Math.random() * 0.12);
+      w.s0 = H * 0.024; w.s1 = H * (0.22 + Math.random() * 0.12);
+    } else {
+      w.dur = 11; w.r = this.moon.r * (2.4 + Math.random() * 0.6); w.a0 = Math.random() * 6.28;
+      w.turns = (Math.random() < 0.5 ? -1 : 1) * 1.1; w.s0 = H * (0.055 + Math.random() * 0.025);
+    }
+    this.witch = w;
+    this.nextWitch = 180 + Math.random() * 120;
   }
 
+  witchPos(w, p) {
+    const { W, H, moon } = this;
+    if (w.kind === 'across') {
+      const x = w.ltr ? lerp(-W * 0.12, W * 1.12, p) : lerp(W * 1.12, -W * 0.12, p);
+      const y = w.y0 - Math.sin(p * Math.PI) * w.amp + Math.sin(p * 9) * H * 0.008;
+      return { x, y, s: w.s0 * lerp(1, w.grow, p) };
+    }
+    if (w.kind === 'approach') {
+      const e = Math.pow(p, 2.1), u = 1 - e;      // slow while far, rushing past at the end
+      return {
+        x: u * u * w.sx + 2 * u * e * w.cx + e * e * w.ex,
+        y: u * u * w.sy + 2 * u * e * w.cy + e * e * w.ey + Math.sin(p * 12) * H * 0.005,
+        s: lerp(w.s0, w.s1, Math.pow(p, 2.4)),
+      };
+    }
+    const k = Math.min(1, p / 0.8);
+    const a = w.a0 + w.turns * 2 * Math.PI * k;
+    let x = moon.x + Math.cos(a) * w.r, y = moon.y + Math.sin(a) * w.r * 0.6;
+    if (p > 0.8) {
+      const q = (p - 0.8) / 0.2;
+      x += q * q * W * 0.8 * Math.sign(-Math.sin(a) * w.turns || 1);
+      y -= q * q * H * 0.15;
+    }
+    return { x, y, s: w.s0 * (1 + 0.18 * Math.sin(a)) };
+  }
+
+  // Draws the witch if she belongs to this layer (big + close = in front of the trees).
+  drawWitchLayer(ctx, t, front) {
+    const w = this.witch;
+    if (!w) return;
+    const p = Math.min(0.999, w.t / w.dur);
+    const a = this.witchPos(w, p), b = this.witchPos(w, Math.min(1, p + 0.01));
+    const isFront = w.kind === 'approach' && a.s > this.H * 0.1;
+    if (isFront !== front) return;
+    ctx.save();
+    ctx.shadowColor = RIM;
+    ctx.shadowBlur = a.s * 0.28;
+    if (b.x < a.x) { ctx.translate(a.x, 0); ctx.scale(-1, 1); ctx.translate(-a.x, 0); }
+    drawWitch(ctx, a.x, a.y, a.s, t);
+    ctx.restore();
+  }
+
+  // The ghost wanders over the lake in depth (z: 0 far … 1 right in front),
+  // hides (fades away and pops up somewhere else, often beside a tree),
+  // and now and then drifts right up towards the audience.
   launchGhost() {
-    const ltr = Math.random() < 0.5;
-    this.ghost = { t: 0, dur: 26, ltr, y: this.hy + this.H * (0.04 + Math.random() * 0.06) };
-    this.nextGhost = 80 + Math.random() * 60;
+    if (this.ghost) return;
+    const fromTree = Math.random() < 0.5;
+    const g = {
+      t: 0, life: 30 + Math.random() * 18, vis: 0, fade: 1, dir: 1,
+      x: fromTree ? this.W * (Math.random() < 0.5 ? 0.1 : 0.92) : this.W * (0.2 + Math.random() * 0.6),
+      z: fromTree ? 0.45 + Math.random() * 0.2 : 0.08 + Math.random() * 0.1,
+    };
+    g.act = { kind: 'drift', t: 0, dur: 0.01, fx: g.x, fz: g.z, tx: g.x, tz: g.z };
+    this.ghost = g;
+    this.nextGhost = 70 + Math.random() * 60;
+  }
+
+  ghostNextAct(g) {
+    const W = this.W;
+    const r = Math.random();
+    const spot = () => Math.random() < 0.4
+      ? { x: W * (Math.random() < 0.5 ? 0.1 : 0.92), z: 0.4 + Math.random() * 0.3 }     // beside a tree
+      : { x: W * (0.15 + Math.random() * 0.7), z: 0.1 + Math.random() * 0.55 };
+    if (g.t > g.life) return { kind: 'leave', t: 0, dur: 1.6 };
+    if (r < 0.5) { const s = spot(); return { kind: 'drift', t: 0, dur: 4 + Math.random() * 4, fx: g.x, fz: g.z, tx: s.x, tz: s.z }; }
+    if (r < 0.78) { const s = spot(); return { kind: 'hide', t: 0, dur: 3 + Math.random() * 2.5, nx: s.x, nz: s.z }; }
+    return { kind: 'approach', t: 0, dur: 4.2, fx: g.x, fz: g.z, tx: W * (0.35 + Math.random() * 0.3), tz: 0.97 };
+  }
+
+  updateGhost(dt) {
+    const g = this.ghost;
+    if (!g) return;
+    g.t += dt;
+    const a = g.act;
+    a.t += dt;
+    const k = Math.min(1, a.t / a.dur);
+    const px = g.x;
+    if (a.kind === 'drift') {
+      const e = ease3(k);
+      g.x = lerp(a.fx, a.tx, e); g.z = lerp(a.fz, a.tz, e); g.fade = 1;
+    } else if (a.kind === 'hide') {
+      // fade out, wait unseen, reappear somewhere else
+      if (k < 0.25) g.fade = 1 - k / 0.25;
+      else if (k < 0.75) { g.fade = 0; g.x = a.nx; g.z = a.nz; }
+      else g.fade = (k - 0.75) / 0.25;
+    } else if (a.kind === 'approach') {
+      const e = Math.pow(k, 1.7);
+      g.x = lerp(a.fx, a.tx, e); g.z = lerp(a.fz, a.tz, e);
+      g.fade = k > 0.85 ? 1 - (k - 0.85) / 0.15 : 1;          // vanishes right in front of you
+      if (k >= 1) { g.z = 0.1 + Math.random() * 0.2; g.x = this.W * (0.2 + Math.random() * 0.6); g.fade = 0; }
+    } else if (a.kind === 'leave') {
+      g.fade = 1 - k;
+      if (k >= 1) { this.ghost = null; return; }
+    }
+    if (Math.abs(g.x - px) > 0.5) g.dir = g.x > px ? 1 : -1;
+    g.vis += ((g.t < 1.5 ? g.t / 1.5 : 1) * g.fade - g.vis) * Math.min(1, dt * 6);
+    if (k >= 1) {
+      g.act = this.ghostNextAct(g);
+      if (a.kind === 'approach') g.act = { kind: 'hide', t: 0, dur: 2.5, nx: g.x, nz: g.z };
+    }
+  }
+
+  drawGhost(ctx, t, L) {
+    const g = this.ghost;
+    if (!g || g.vis < 0.01) return;
+    const { H, hy } = this;
+    const z = g.z;
+    const s = H * (0.05 + 0.32 * Math.pow(z, 1.5));
+    const water = hy + (H - hy) * (0.05 + z * 0.85);
+    const x = g.x, y = water - s * 0.95 + Math.sin(t * 0.9) * s * 0.06;
+    const close = z > 0.75 ? lerp(1, 0.6, (z - 0.75) / 0.25) : 1;
+    const a = g.vis * 0.26 * (1 - L * 0.45) * close;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.globalAlpha = a * 0.9;
+    ctx.drawImage(this.ghostGlow, x - s * 1.3, y - s * 1.2, s * 2.6, s * 2.6);
+    ctx.globalAlpha = a * 0.5;                                   // faint reflection on the water
+    ctx.drawImage(this.ghostGlow, x - s * 0.8, water - s * 0.06, s * 1.6, s * 0.3);
+    ctx.restore();
+    ctx.save();
+    ctx.translate(x, y);
+    if (g.dir < 0) ctx.scale(-1, 1);
+    ctx.rotate(Math.sin(t * 0.7) * 0.06 + 0.08);
+    ctx.globalAlpha = a;
+    ghostPath(ctx, s, t);
+    const grad = ctx.createLinearGradient(0, -s * 0.6, 0, s * 0.7);
+    grad.addColorStop(0, 'rgba(240,245,255,1)');
+    grad.addColorStop(1, 'rgba(205,220,255,0)');
+    ctx.fillStyle = grad;
+    ctx.fill();
+    ctx.fillStyle = 'rgba(10,12,30,1)';
+    ctx.globalAlpha = Math.min(1, a * 2);
+    ctx.beginPath(); ctx.ellipse(-s * 0.15, -s * 0.25, s * 0.06, s * 0.09, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(s * 0.12, -s * 0.25, s * 0.06, s * 0.09, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(-s * 0.01, -s * 0.05, s * 0.06, s * 0.08, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
   }
 
   // Sky layer: witch and bats, with a faint moonlit glow so they stand out.
@@ -800,19 +1058,9 @@ export class Halloween {
     ctx.save();
     ctx.shadowColor = RIM;
     if (this.witch) {
-      const w = this.witch;
-      w.t += dt;
-      const p = w.t / w.dur;
-      if (p >= 1) this.witch = null;
-      else {
-        const x = w.ltr ? lerp(-W * 0.1, W * 1.1, p) : lerp(W * 1.1, -W * 0.1, p);
-        const y = moon.y + (x - moon.x) * (w.ltr ? 0.12 : -0.12) + Math.sin(p * 10) * H * 0.008;
-        ctx.shadowBlur = H * 0.012;
-        ctx.save();
-        if (!w.ltr) { ctx.translate(x, 0); ctx.scale(-1, 1); ctx.translate(-x, 0); }
-        drawWitch(ctx, x, y, H * 0.065, t);
-        ctx.restore();
-      }
+      this.witch.t += dt;
+      if (this.witch.t >= this.witch.dur) this.witch = null;
+      else this.drawWitchLayer(ctx, t, false);
     }
     if (this.bats) {
       const b = this.bats;
@@ -922,39 +1170,6 @@ export class Halloween {
       }
       ctx.restore();
     }
-    if (this.ghost) {
-      const gh = this.ghost;
-      gh.t += dt;
-      const p = gh.t / gh.dur;
-      if (p >= 1) { this.ghost = null; return; }
-      const x = gh.ltr ? lerp(W * 0.15, W * 0.85, p) : lerp(W * 0.85, W * 0.15, p);
-      const y = gh.y + Math.sin(t * 0.9) * H * 0.012 - Math.sin(p * Math.PI) * H * 0.02;
-      const a = Math.sin(p * Math.PI) ** 2 * 0.11 * clamp01(1.2 - L);
-      if (a < 0.003) return;
-      const s = H * 0.075;
-      ctx.save();
-      ctx.globalCompositeOperation = 'lighter';
-      ctx.globalAlpha = a * 0.8;
-      ctx.drawImage(this.ghostGlow, x - s * 1.2, y - s * 1.1, s * 2.4, s * 2.4);
-      ctx.restore();
-      ctx.save();
-      ctx.translate(x, y);
-      if (!gh.ltr) ctx.scale(-1, 1);
-      ctx.rotate(Math.sin(t * 0.7) * 0.06 + 0.08);
-      ctx.globalAlpha = a;
-      ghostPath(ctx, s, t);
-      const grad = ctx.createLinearGradient(0, -s * 0.6, 0, s * 0.7);
-      grad.addColorStop(0, 'rgba(235,242,255,1)');
-      grad.addColorStop(1, 'rgba(200,215,255,0)');
-      ctx.fillStyle = grad;
-      ctx.fill();
-      ctx.fillStyle = 'rgba(10,12,30,1)';
-      ctx.globalAlpha = a * 1.6;
-      ctx.beginPath(); ctx.ellipse(-s * 0.15, -s * 0.25, s * 0.06, s * 0.09, 0, 0, Math.PI * 2); ctx.fill();
-      ctx.beginPath(); ctx.ellipse(s * 0.12, -s * 0.25, s * 0.06, s * 0.09, 0, 0, Math.PI * 2); ctx.fill();
-      ctx.beginPath(); ctx.ellipse(-s * 0.01, -s * 0.05, s * 0.06, s * 0.08, 0, 0, Math.PI * 2); ctx.fill();
-      ctx.restore();
-    }
   }
 
   // Foreground: trees (with owls + spider), flying owls, the bank with the
@@ -983,6 +1198,7 @@ export class Halloween {
           if (p.tree === side && p.limb === idx) lights.push(...this.drawOwl(ctx, o, p.x, p.y - H * 0.004, t));
         }
         if (tree.spider && tree.spider.limb === idx) this.drawSpider(ctx, tree.spider.x, tree.spider.y, t);
+        for (const sp of this.spiders) if (sp.side === side && sp.limb === idx) this.drawDropSpider(ctx, sp, t);
         ctx.restore();
       });
     }
@@ -1004,7 +1220,26 @@ export class Halloween {
     }
     ctx.restore();
 
+    for (const sp of this.spiders) if (sp.top) this.drawDropSpider(ctx, sp, t);
+    // Cobweb in a top corner, with twinkling dew
+    if (this.web) {
+      const wb = this.web;
+      ctx.save();
+      if (wb.right) { ctx.translate(W, 0); ctx.scale(-1, 1); }
+      ctx.drawImage(wb.canvas, 0, 0);
+      ctx.globalCompositeOperation = 'lighter';
+      for (const [gx, gy, ph] of wb.glints) {
+        const tw = Math.pow(Math.max(0, Math.sin(t * 1.3 + ph)), 6);
+        if (tw < 0.05) continue;
+        ctx.globalAlpha = tw;
+        ctx.drawImage(this.drop, gx - 4, gy - 4, 8, 8);
+      }
+      ctx.restore();
+    }
+    this.drawWitchLayer(ctx, t, true);
+
     ctx.drawImage(this.bank.canvas, this.bank.x, this.bank.y);
+    ctx.drawImage(this.rbank.canvas, this.rbank.x, this.rbank.y);
 
     // The skeleton: rises from the ground, walks to the edge, falls in.
     if (this.skel) this.drawSkel(ctx, t, cam, lights);
@@ -1234,31 +1469,52 @@ export class Halloween {
     // Slowly lowers and climbs back up, with pauses.
     const cyc = (t % 40) / 40;
     const k = cyc < 0.4 ? cyc / 0.4 : cyc < 0.55 ? 1 : cyc < 0.95 ? 1 - (cyc - 0.55) / 0.4 : 0;
-    const len = H * (0.03 + 0.13 * (0.5 - 0.5 * Math.cos(k * Math.PI)));
-    const sway = Math.sin(t * 0.8) * H * 0.004;
+    const len = H * (0.03 + 0.14 * (0.5 - 0.5 * Math.cos(k * Math.PI)));
+    this.spiderAt(ctx, ax, ay, len, H * 0.017, t, 0);
+  }
+
+  drawDropSpider(ctx, sp, t) {
+    let k;
+    if (sp.t < sp.down) k = sp.t / sp.down;
+    else if (sp.t < sp.down + sp.pause) k = 1;
+    else k = 1 - (sp.t - sp.down - sp.pause) / sp.up;
+    const len = sp.len * (0.5 - 0.5 * Math.cos(Math.max(0, k) * Math.PI));
+    this.spiderAt(ctx, sp.x, sp.y, Math.max(2, len), sp.s, t, sp.ph);
+  }
+
+  // A spider on its silk thread, with a moonlit outline so it shows up.
+  spiderAt(ctx, ax, ay, len, s, t, ph) {
+    const sway = Math.sin(t * 0.8 + ph) * this.H * 0.005;
     const sx = ax + sway, sy = ay + len;
     ctx.save();
-    ctx.strokeStyle = 'rgba(200,205,220,0.35)';
-    ctx.lineWidth = 0.8;
+    ctx.strokeStyle = 'rgba(225,230,245,0.6)';
+    ctx.lineWidth = 1.2;
     ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(sx, sy); ctx.stroke();
-    const s = H * 0.008;
+    ctx.shadowColor = RIM;
+    ctx.shadowBlur = s * 0.9;
     ctx.fillStyle = SIL;
     ctx.strokeStyle = SIL;
-    ctx.lineWidth = Math.max(1, s * 0.22);
-    ctx.beginPath(); ctx.arc(sx, sy + s * 0.6, s * 0.75, 0, Math.PI * 2); ctx.fill();
-    ctx.beginPath(); ctx.arc(sx, sy + s * 1.6, s, 0, Math.PI * 2); ctx.fill();
-    const wig = Math.sin(t * 6) * 0.15;
+    ctx.lineWidth = Math.max(1.4, s * 0.16);
+    ctx.lineCap = 'round';
+    const wig = Math.sin(t * 6 + ph) * 0.18;
     for (let i = 0; i < 4; i++) {
       for (const d of [-1, 1]) {
         const a0 = (i - 1.5) * 0.45 + wig * (i % 2 ? 1 : -1);
-        const kx = sx + d * s * 1.4, ky = sy + s * (0.4 + i * 0.35) - s * 0.6;
+        const kx = sx + d * s * 1.5, ky = sy + s * (0.4 + i * 0.35) - s * 0.75;
         ctx.beginPath();
         ctx.moveTo(sx, sy + s * (0.6 + i * 0.12));
         ctx.lineTo(kx, ky + Math.sin(a0) * s);
-        ctx.lineTo(sx + d * s * 2.0, sy + s * (0.7 + i * 0.45));
+        ctx.lineTo(sx + d * s * 2.2, sy + s * (0.7 + i * 0.5));
         ctx.stroke();
       }
     }
+    ctx.beginPath(); ctx.arc(sx, sy + s * 0.55, s * 0.7, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(sx, sy + s * 1.7, s * 0.95, s * 1.1, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.shadowBlur = 0;
+    // tiny red eyes
+    ctx.fillStyle = 'rgba(255,60,40,0.9)';
+    ctx.beginPath(); ctx.arc(sx - s * 0.22, sy + s * 0.75, Math.max(1, s * 0.1), 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(sx + s * 0.22, sy + s * 0.75, Math.max(1, s * 0.1), 0, Math.PI * 2); ctx.fill();
     ctx.restore();
   }
 }

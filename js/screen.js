@@ -98,7 +98,7 @@ function resize() {
     for (let i = 0; i < N; i++) pick.add(Math.floor(((i + 0.5) * P) / N));
     targets = all.filter((_, i) => pick.has(i));
     fillers = all.filter((_, i) => !pick.has(i)).map(t => ({
-      x: t.x, y: t.y, seed: Math.random() * 100,
+      x: t.x, y: t.y, k: t.k || 1, seed: Math.random() * 100,
       jx: (Math.random() - 0.5) * 0.36, jy: (Math.random() - 0.5) * 0.3, sizeVar: 0.5 + Math.random() * 0.15,
     }));
   }
@@ -259,10 +259,12 @@ function replayFinale() {
 }
 
 function formedFloat(L, t, sp) {
+  sp *= t.k || 1;                       // further away = smaller drift
   const swell = Math.sin(now * 0.55 - (t.x / W) * 7) * sp * 0.16;
   return {
     x: L.jx * sp + Math.sin(now * 0.31 + L.seed) * sp * 0.12 + Math.sin(now * 0.13 + L.seed * 3) * sp * 0.06,
-    y: L.jy * sp + swell + Math.cos(now * 0.27 + L.seed * 1.3) * sp * 0.08,
+    // the water is seen at an angle, so up/down drift looks flatter
+    y: (L.jy * sp + swell + Math.cos(now * 0.27 + L.seed * 1.3) * sp * 0.08) * 0.6,
   };
 }
 
@@ -282,7 +284,7 @@ function lampPos(L) {
     // offset, its own slow drift, and a gentle swell rolls through the word.
     const sp = finaleLampSize;
     const drift = formedFloat(L, t, sp);
-    const s = lerp(L.from.s, sp * L.sizeVar, e);
+    const s = lerp(L.from.s, sp * L.sizeVar * (t.k || 1), e);
     return {
       x: lerp(L.from.x, t.x + drift.x, e) + Math.sin(p * Math.PI) * L.sway,
       y: lerp(L.from.y, t.y + drift.y, e) + bob * s * 0.04,
@@ -673,6 +675,21 @@ try {
 
 function toast(t) { toastText = t; toastUntil = now + 4.5; }
 
+// Projector brightness (P cycles it; remembered on this laptop). Projectors
+// wash out dark scenes, so this lifts everything a little.
+const BRIGHT_STEPS = [1, 1.15, 1.3, 1.45, 1.6];
+let bright = 1;
+try { bright = Number(localStorage.getItem('lol_bright')) || 1; } catch { /* ignore */ }
+function applyBright() { canvas.style.filter = bright === 1 ? '' : `brightness(${bright})`; }
+applyBright();
+function cycleBright() {
+  const i = BRIGHT_STEPS.indexOf(bright);
+  bright = BRIGHT_STEPS[(i + 1) % BRIGHT_STEPS.length];
+  try { localStorage.setItem('lol_bright', String(bright)); } catch { /* ignore */ }
+  applyBright();
+  toast(`Brightness ${Math.round(bright * 100)}%`);
+}
+
 function applyState(st, instant = false) {
   if (!st) return;
   legacyDb = !!st.legacy;
@@ -901,7 +918,7 @@ setInterval(() => {
   document.getElementById('helpStatus').textContent =
     `Screen: ${phase === 'lake' ? 'the lake' : 'join screen'} · joined ${joined} / ${N}${phase === 'gather' && autoOpen ? ` · opens at ${Math.ceil((N * startAt) / 100)}` : ''}${legacyDb ? ' · (old database: re-run schema.sql)' : ''}\n` +
     `Lamps lit: ${litCount} / ${N} · waiting: ${pending.length} · mode: ${MODE}\n` +
-    `${fpsShown} fps · quality ${Math.round(quality * 100)}% · counter ${showCounter ? 'on' : 'off'}\n` +
+    `${fpsShown} fps · quality ${Math.round(quality * 100)}% · brightness ${Math.round(bright * 100)}% · counter ${showCounter ? 'on' : 'off'}\n` +
     `Last lamp check: ${lastLampCheck ? Math.round(now - lastLampCheck) + 's ago' : '—'} · phone shakes: ${shakeStatus}${frameErrors ? ` · frame errors: ${frameErrors}` : ''}\n` +
     `Guest link: ${guestUrl()}`;
 }, 500);
@@ -1017,7 +1034,7 @@ function frameBody() {
   if (fillerA > 0) {
     for (const f of fillers) {
       const d = formedFloat(f, f, finaleLampSize);
-      const p = { x: f.x + d.x, y: f.y + d.y, s: finaleLampSize * f.sizeVar };
+      const p = { x: f.x + d.x, y: f.y + d.y, s: finaleLampSize * f.sizeVar * f.k };
       const depth = clamp01((p.y - H * HORIZON) / (H * (1 - HORIZON)));
       p.x += scene.cam.x * (0.35 + 0.6 * depth);
       p.y += scene.cam.y * (0.35 + 0.6 * depth);
@@ -1059,7 +1076,10 @@ function frameBody() {
   }
   drawSparks(dt);
 
-  scene.drawMist(ctx, dt, mistAmount, false);
+  // Lake mist wanders in front of the lamps and glows where they are lit
+  // (a little always stays, even when the lake is full of light).
+  scene.drawLakeMist(ctx, now, dt, finale && finale.t0 !== null ? 0.35 : Math.max(0.55, mistAmount), lm);
+  scene.drawGhost(ctx, now, Math.min(1, light));
   scene.drawFireflies(ctx, now, 1 - (formed ? 0.5 : 0));
   scene.drawFront(ctx, now);
   drawGather(dt);
@@ -1134,6 +1154,7 @@ window.addEventListener('keydown', e => {
     try { localStorage.setItem('lol_counter', showCounter ? 'on' : 'off'); } catch { /* ignore */ }
   }
   else if (k === 'l') togglePhase();
+  else if (k === 'p') cycleBright();
   else if (k === 'w' && !e.shiftKey) { scene.hw.witch = null; scene.hw.launchWitch(); }
   else if (k === 'k') scene.hw.launchSkeleton();
   else if (k === 'o') scene.hw.owlArrive();

@@ -13,9 +13,9 @@ const css = (c, a = 1) => `rgba(${Math.round(c[0])},${Math.round(c[1])},${Math.r
 
 // Night palette (L = 0: dark lake, L = 1: lake full of light).
 // Lifted a little so black silhouettes stand out, even on a projector.
-const SKY_TOP = [[8, 10, 30], [12, 14, 38]];
-const SKY_MID = [[22, 24, 62], [36, 30, 72]];
-const SKY_LOW = [[54, 44, 92], [96, 64, 92]];
+const SKY_TOP = [[14, 16, 42], [18, 20, 50]];
+const SKY_MID = [[34, 36, 84], [48, 42, 92]];
+const SKY_LOW = [[74, 62, 118], [116, 82, 112]];
 
 export class Scene {
   constructor(seed) {
@@ -62,9 +62,10 @@ export class Scene {
       sp: 1.2 + gr() * 3.5, ph: gr() * 6.28, size: 0.4 + gr() * 0.8,
     }));
 
+    // Far mist bank near the horizon (behind the lamps)
     this.mist = [];
-    for (let i = 0; i < 26; i++) {
-      const far = i < 16;
+    for (let i = 0; i < 16; i++) {
+      const far = true;
       const w = W * (far ? 0.28 + rand() * 0.35 : 0.4 + rand() * 0.45);
       this.mist.push({
         far,
@@ -75,6 +76,14 @@ export class Scene {
         a: far ? 0.16 + rand() * 0.12 : 0.06 + rand() * 0.07,
       });
     }
+
+    // Lake mist: soft wisps wandering over the water (in front of the lamps),
+    // drawn at low resolution and lit warm wherever lamps glow.
+    this.lakeWisps = Array.from({ length: 24 }, () => this.newWisp(true));
+    this.mistC = document.createElement('canvas');
+    this.mistC.width = Math.ceil(W / 4); this.mistC.height = Math.ceil(H / 4);
+    this.warmC = document.createElement('canvas');
+    this.warmC.width = this.mistC.width; this.warmC.height = this.mistC.height;
 
     this.clouds = [];
     for (let i = 0; i < 5; i++) {
@@ -140,7 +149,7 @@ export class Scene {
     g.translate(pad, 0);
     const hy = this.hy;
     const rand = rng(this.seed + 31);
-    const FAR = '#141127', NEAR = '#03040a';
+    const FAR = '#1e1938', NEAR = '#03040a';
     g.lineCap = 'round';
     g.lineJoin = 'round';
 
@@ -348,7 +357,7 @@ export class Scene {
     const g = c.getContext('2d');
     const grad = g.createRadialGradient(W / 2, H * 0.55, Math.min(W, H) * 0.38, W / 2, H * 0.55, Math.max(W, H) * 0.8);
     grad.addColorStop(0, 'rgba(0,0,0,0)');
-    grad.addColorStop(1, 'rgba(0,0,0,0.5)');
+    grad.addColorStop(1, 'rgba(0,0,0,0.32)');
     g.fillStyle = grad;
     g.fillRect(0, 0, W, H);
     return c;
@@ -421,10 +430,10 @@ export class Scene {
     // Water: like real water it mirrors the sky — brightest near the horizon
     // (seen at a grazing angle), darker close up where you look into it.
     const water = ctx.createLinearGradient(0, hy, 0, H);
-    water.addColorStop(0, css(mixc(low, [0, 0, 0], 0.25)));
-    water.addColorStop(0.12, css(mixc(mid, [0, 0, 0], 0.35)));
-    water.addColorStop(0.45, css(mixc(mid, [0, 0, 0], 0.72)));
-    water.addColorStop(1, css(mixc(top, [0, 0, 0], 0.75)));
+    water.addColorStop(0, css(mixc(low, [0, 0, 0], 0.2)));
+    water.addColorStop(0.12, css(mixc(mid, [0, 0, 0], 0.3)));
+    water.addColorStop(0.45, css(mixc(mid, [0, 0, 0], 0.6)));
+    water.addColorStop(1, css(mixc(top, [0, 0, 0], 0.62)));
     ctx.fillStyle = water;
     ctx.fillRect(0, hy, W, H - hy);
 
@@ -546,6 +555,59 @@ export class Scene {
     });
   }
 
+  newWisp(initial) {
+    const { W, H, hy } = this;
+    const d = Math.pow(Math.random(), 0.8);           // 0 far … 1 near
+    const w = W * (0.16 + Math.random() * 0.3) * (0.45 + d * 0.9);
+    const life = 18 + Math.random() * 24;
+    return {
+      x: Math.random() * W * 1.2 - W * 0.1, y: hy + (H - hy) * (0.06 + d * 0.92),
+      w, h: w * (0.14 + Math.random() * 0.1),
+      vx: (Math.random() - 0.35) * W * 0.012, vy: (Math.random() - 0.5) * H * 0.002,
+      age: initial ? Math.random() * life : 0, life, a: 0.1 + Math.random() * 0.12, ph: Math.random() * 6.28,
+    };
+  }
+
+  // Lake mist, glowing warm where it drifts past lit lamps.
+  // lightmap = the screen's low-res canvas of lamp glows (or null).
+  drawLakeMist(ctx, t, dt, amount, lightmap) {
+    if (amount <= 0.002) return;
+    const { W, H } = this;
+    const mc = this.mistC, mg = mc.getContext('2d');
+    const k = mc.width / W;
+    mg.setTransform(1, 0, 0, 1, 0, 0);
+    mg.clearRect(0, 0, mc.width, mc.height);
+    for (let i = 0; i < this.lakeWisps.length; i++) {
+      const m = this.lakeWisps[i];
+      m.age += dt;
+      if (m.age > m.life) { this.lakeWisps[i] = this.newWisp(false); continue; }
+      m.x += (m.vx + this.hw.gust * this.hw.gustDir * W * 0.05) * dt + Math.sin(t * 0.13 + m.ph) * W * 0.0006;
+      m.y += m.vy * dt + Math.sin(t * 0.09 + m.ph * 2) * H * 0.0002;
+      const env = Math.sin(Math.PI * (m.age / m.life));
+      mg.globalAlpha = m.a * env * env * amount;
+      const breathe = 1 + 0.08 * Math.sin(t * 0.3 + m.ph);
+      mg.drawImage(this.mistSprite, (m.x - m.w / 2) * k, (m.y - m.h / 2) * k, m.w * k * breathe, m.h * k);
+    }
+    mg.globalAlpha = 1;
+    this.layer(ctx, 0.9, () => {
+      ctx.drawImage(mc, 0, 0, W, H);
+      if (lightmap) {
+        // Lamp light caught in the mist: the mist's shape, filled with lamp glow.
+        const wc = this.warmC, wg = wc.getContext('2d');
+        wg.globalCompositeOperation = 'copy';
+        wg.drawImage(mc, 0, 0);
+        wg.globalCompositeOperation = 'source-in';
+        wg.drawImage(lightmap, 0, 0, wc.width, wc.height);
+        wg.globalCompositeOperation = 'source-over';
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.drawImage(wc, 0, 0, W, H);
+        ctx.drawImage(wc, 0, 0, W, H);
+        ctx.restore();
+      }
+    });
+  }
+
   drawFireflies(ctx, t, amount = 1) {
     this.layer(ctx, 0.7, () => {
       ctx.save();
@@ -564,6 +626,11 @@ export class Scene {
 
   drawWater(ctx, t, dt, L) {
     this.layer(ctx, 0.5, () => this.hw.drawWater(ctx, t, dt, L));
+  }
+
+  // The ghost: in front of the lamps, behind the foreground trees (so it can hide behind them).
+  drawGhost(ctx, t, L) {
+    this.layer(ctx, 0.6, () => this.hw.drawGhost(ctx, t, L));
   }
 
   drawFront(ctx, t) {
