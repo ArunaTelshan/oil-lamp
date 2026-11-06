@@ -188,21 +188,11 @@ export function wordTargets(word, n, W, H) {
   unitPts.length = 0;
   unitPts.push(...kept);
 
-  // Lay the word flat on the water, in perspective: the top of the letters
-  // is further away (narrower, smaller lamps), the bottom is closer (wider,
-  // bigger lamps). k = lamp size factor at that spot (1 = nearest row).
-  const D_FAR = 1.2;                 // how much further the top of the letters is
-  const hyEff = -H * 0.2;            // gentle tilt: the word stays easy to read
-  const yNear = H * 0.84;            // bottom of the letters
-  const nearW = Math.min(W * 0.84, H * 1.25);
-  return unitPts.map(([x, y]) => {
-    const d = D_FAR + (1 - D_FAR) * y;          // y: 0 top (far) … 1 bottom (near)
-    return {
-      x: W / 2 + (x / wordW - 0.5) * nearW / d,
-      y: hyEff + (yNear - hyEff) / d,
-      k: 1 / d,
-    };
-  });
+  // Fit the word on the lake: plain flat letters, all lamps the same size.
+  const unit = Math.min((W * 0.8) / wordW, H * 0.2);
+  const ox = (W - wordW * unit) / 2;
+  const oy = H * 0.705 - unit / 2;
+  return unitPts.map(([x, y]) => ({ x: ox + x * unit, y: oy + y * unit, k: 1 }));
 }
 
 // Spacing between neighbouring lamps in the formation (pixels).
