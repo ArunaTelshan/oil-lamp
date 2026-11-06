@@ -144,7 +144,8 @@ Move the mouse and a small **?** appears on the left edge. Click it (or press `H
 | `M` | Sound on/off |
 | `H` | Commands panel, with live status (lamp count, connection, frame rate) |
 | `W` `K` `O` `B` `G` | Summon now: **W**itch across the moon, s**K**eleton walks into the lake, an **O**wl flies in, **B**ats, **G**host in the mist |
-| `Shift+R` | Replay the WELCOME finale (only after all lamps are lit) |
+| `Shift+W` twice | Form WELCOME now with the lamps lit so far (if not every guest lights a lamp) |
+| `Shift+R` | Replay the WELCOME finale (after it has formed) |
 | `Space` / `D` | Demo mode only: add a lamp / pause or resume |
 
 **Projector tip:** projectors wash out dark scenes. If the witch, ghost or spiders are hard to see, press `P` until they stand out.

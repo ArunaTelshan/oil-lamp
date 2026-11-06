@@ -32,13 +32,14 @@ function setTotal(n) {
   ORDER = makeOrder(CONFIG.LAYOUT_SEED, N, SLOTS);
 }
 
-const VERSION = '2026-11-06b';   // shown in the commands panel (H): confirms the screen has the latest update
+const VERSION = '2026-11-06c';   // shown in the commands panel (H): confirms the screen has the latest update
 let W = 0, H = 0, DPR = 1, BASE = 30;
 let targets = [], finaleLampSize = 20;
 // With fewer than this many lamps, small extra tea-lights fill in the
 // letters during the finale so WELCOME stays readable.
 const FINALE_MIN_POINTS = 110;
 let fillers = [];
+let forcedN = 0, forceAsk = -10;   // WELCOME forced early by the operator (Shift+W twice)
 
 const lamps = [];          // lamps on the lake (arriving or lit)
 const pending = [];        // lamps waiting for their arrival moment
@@ -91,23 +92,28 @@ function resize() {
   BASE = H * 0.047 * Math.max(0.55, Math.min(1.25, Math.sqrt(140 / N)));
   scene.resize(W, H);
   resizeLightMap();
-  const P = Math.max(N, FINALE_MIN_POINTS);
+  buildTargets(forcedN || N);
+  if (finale) {
+    for (const L of lamps) { const p = slotPos(L); L.from = { x: p.x, y: p.y, s: p.s }; }
+    assignTargets();
+  }
+  buildQR();
+}
+
+// Letter spots for n lamps (plus extra lamps to complete the word for small groups).
+function buildTargets(n) {
+  const P = Math.max(n, FINALE_MIN_POINTS);
   const all = wordTargets(WORD, P, W, H);
   finaleLampSize = wordSpacing(WORD, P, W, H) * 0.78;
-  if (P === N) { targets = all; fillers = []; } else {
+  if (P === n) { targets = all; fillers = []; } else {
     const pick = new Set();
-    for (let i = 0; i < N; i++) pick.add(Math.floor(((i + 0.5) * P) / N));
+    for (let i = 0; i < n; i++) pick.add(Math.floor(((i + 0.5) * P) / n));
     targets = all.filter((_, i) => pick.has(i));
     fillers = all.filter((_, i) => !pick.has(i)).map(t => ({
       x: t.x, y: t.y, k: t.k || 1, seed: Math.random() * 100,
       jx: (Math.random() - 0.5) * 0.36, jy: (Math.random() - 0.5) * 0.3, sizeVar: 0.97 + Math.random() * 0.06,   // same size as guests' lamps, so letters stay whole
     }));
   }
-  if (finale) {
-    for (const L of lamps) { const p = slotPos(L); L.from = { x: p.x, y: p.y, s: p.s }; }
-    assignTargets();
-  }
-  buildQR();
 }
 
 function slotPos(lamp) {
@@ -251,8 +257,24 @@ function formNow() {
   scene.hw.enabled = false;
 }
 
+// Operator: form WELCOME now with the lamps lit so far (Shift+W twice),
+// for when not every expected guest lights a lamp.
+function forceWelcome() {
+  if (finale) { toast('WELCOME is already showing (Shift+R replays it)'); return; }
+  if (phase !== 'lake') { toast('Open the lake first (L)'); return; }
+  if (!lamps.length && !pending.length) { toast('No lamps lit yet'); return; }
+  if (now - forceAsk > 4) { forceAsk = now; toast('Press Shift+W again to form WELCOME now'); return; }
+  forceAsk = -10;
+  while (pending.length) placeLit(pending.shift());    // lamps still queued join right away
+  forcedN = lamps.length;
+  buildTargets(forcedN);
+  finale = { at: now + 2.4, t0: null };
+  audio.hush(2.4);
+  toast(`WELCOME with ${forcedN} lamps`);
+}
+
 function replayFinale() {
-  if (litCount < N) return;
+  if (litCount < N && !forcedN) return;
   finale = { at: now + 1.5, t0: null };
   formed = false;
   for (const L of lamps) L.landed = false;
@@ -1158,6 +1180,7 @@ window.addEventListener('keydown', e => {
   else if (k === 'l') togglePhase();
   else if (k === 'p') cycleBright();
   else if (k === 'w' && !e.shiftKey) { scene.hw.witch = null; scene.hw.launchWitch(); }
+  else if (k === 'w' && e.shiftKey) forceWelcome();
   else if (k === 'k') scene.hw.launchSkeleton();
   else if (k === 'o') scene.hw.owlArrive();
   else if (k === 'b') scene.hw.launchBats();
