@@ -32,6 +32,7 @@ function setTotal(n) {
   ORDER = makeOrder(CONFIG.LAYOUT_SEED, N, SLOTS);
 }
 
+const VERSION = '2026-11-06b';   // shown in the commands panel (H): confirms the screen has the latest update
 let W = 0, H = 0, DPR = 1, BASE = 30;
 let targets = [], finaleLampSize = 20;
 // With fewer than this many lamps, small extra tea-lights fill in the
@@ -99,7 +100,7 @@ function resize() {
     targets = all.filter((_, i) => pick.has(i));
     fillers = all.filter((_, i) => !pick.has(i)).map(t => ({
       x: t.x, y: t.y, k: t.k || 1, seed: Math.random() * 100,
-      jx: (Math.random() - 0.5) * 0.36, jy: (Math.random() - 0.5) * 0.3, sizeVar: 0.88 + Math.random() * 0.24,   // same size as guests' lamps, so letters stay whole
+      jx: (Math.random() - 0.5) * 0.36, jy: (Math.random() - 0.5) * 0.3, sizeVar: 0.97 + Math.random() * 0.06,   // same size as guests' lamps, so letters stay whole
     }));
   }
   if (finale) {
@@ -284,7 +285,7 @@ function lampPos(L) {
     // offset, its own slow drift, and a gentle swell rolls through the word.
     const sp = finaleLampSize;
     const drift = formedFloat(L, t, sp);
-    const s = lerp(L.from.s, sp * L.sizeVar * (t.k || 1), e);
+    const s = lerp(L.from.s, sp * (1 + (L.sizeVar - 1) * 0.25) * (t.k || 1), e);   // near-uniform sizes in the word
     return {
       x: lerp(L.from.x, t.x + drift.x, e) + Math.sin(p * Math.PI) * L.sway,
       y: lerp(L.from.y, t.y + drift.y, e) + bob * s * 0.04,
@@ -920,7 +921,8 @@ setInterval(() => {
     `Lamps lit: ${litCount} / ${N} · waiting: ${pending.length} · mode: ${MODE}\n` +
     `${fpsShown} fps · quality ${Math.round(quality * 100)}% · brightness ${Math.round(bright * 100)}% · counter ${showCounter ? 'on' : 'off'}\n` +
     `Last lamp check: ${lastLampCheck ? Math.round(now - lastLampCheck) + 's ago' : '—'} · phone shakes: ${shakeStatus}${frameErrors ? ` · frame errors: ${frameErrors}` : ''}\n` +
-    `Guest link: ${guestUrl()}`;
+    `Guest link: ${guestUrl()}\n` +
+    `Version: ${VERSION}`;
 }, 500);
 
 function drawOperator() {
