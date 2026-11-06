@@ -99,7 +99,7 @@ function resize() {
     targets = all.filter((_, i) => pick.has(i));
     fillers = all.filter((_, i) => !pick.has(i)).map(t => ({
       x: t.x, y: t.y, k: t.k || 1, seed: Math.random() * 100,
-      jx: (Math.random() - 0.5) * 0.36, jy: (Math.random() - 0.5) * 0.3, sizeVar: 0.5 + Math.random() * 0.15,
+      jx: (Math.random() - 0.5) * 0.36, jy: (Math.random() - 0.5) * 0.3, sizeVar: 0.88 + Math.random() * 0.24,   // same size as guests' lamps, so letters stay whole
     }));
   }
   if (finale) {
@@ -1028,7 +1028,7 @@ function frameBody() {
     drawLampBodyPass(L, p, inten);
     shown.push([L, p, inten]);
   }
-  // Tea-lights that complete the letters (small groups only)
+  // Extra lamps that complete the letters (small groups only), same size as the guests' lamps
   const fillerA = finale && finale.t0 !== null && fillers.length ? clamp01((now - finale.t0 - 3.5) / 4) : 0;
   const fillerPos = [];
   if (fillerA > 0) {
@@ -1042,8 +1042,8 @@ function frameBody() {
       ctx.globalAlpha = fillerA;
       ctx.drawImage(BODY.c, p.x - BODY.ox * k, p.y - BODY.oy * k, BODY.c.width * k, BODY.c.height * k);
       const w = wickPos(p.x, p.y, p.s);
-      const g = p.s * 4 * LM;
-      lctx.globalAlpha = 0.4 * fillerA;
+      const g = p.s * 4.2 * LM;
+      lctx.globalAlpha = 0.45 * fillerA;
       lctx.drawImage(glow, w.x * LM - g / 2, (w.y - p.s * 0.4) * LM - g / 2, g, g);
       fillerPos.push([f, p, w]);
     }
@@ -1055,7 +1055,7 @@ function frameBody() {
   ctx.restore();
   for (const [L, p, inten] of shown) drawLampFlamePass(L, p, inten);
   for (const [f, p, w] of fillerPos) {
-    const fh = p.s * 0.95 * (1 + 0.07 * wobble(now, f.seed)) * 1.1;
+    const fh = p.s * 0.95 * (1 + 0.07 * wobble(now, f.seed));
     const k = fh / H0;
     ctx.save();
     ctx.globalAlpha = fillerA;
